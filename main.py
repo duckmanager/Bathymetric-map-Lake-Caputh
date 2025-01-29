@@ -1,6 +1,9 @@
 from pathlib import Path
+import pandas as pd
+import geopandas as gpd
 from pymatreader import read_mat
 from datetime import datetime, timedelta
+from shapely.geometry import Point
 from tqdm import tqdm
 import json 
 
@@ -110,9 +113,47 @@ def get_gps(data_dir: Path):
 
     return data
 
+def convert_coords_to_utm(gps_data: dict) -> dict:
+    """
+    Converts latitude and longitude in gps_data to UTM32 coordinates using GeoPandas.
+    If lat and long are 0, the entry for that second is removed.
 
-# Interpolation durch: abstände durch 
-# def interpolate_gps_data(gps_data:dict)
+    args:
+        gps_data (dict): GPS data in the original format.
+
+    returns:
+        dict: GPS data with UTM32 coordinates, or removed entries where lat and long are 0.
+    """
+    # Iterate through the GPS data
+    for date, times in gps_data.items():
+        times_to_delete = []  # Track times with lat and lon equal to 0 for deletion
+
+        for time, (lat, lon) in times.items():
+            # If lat and lon are both 0, mark this entry for deletion
+            if lat == 0 and lon == 0:
+                times_to_delete.append(time)
+                continue  # Skip processing this entry
+
+            # Create a Point geometry from lat, lon if lat, lon are not 0
+            point = Point(lon, lat)  # GeoPandas uses (longitude, latitude)
+            
+            # Convert to GeoDataFrame with WGS84 (EPSG:4326)
+            gdf = gpd.GeoDataFrame([{'geometry': point}], crs="EPSG:4326")
+            
+            # Transform to UTM32 (EPSG:32632)
+            gdf_utm = gdf.to_crs(epsg=32632)
+            
+            # Extract the UTM coordinates
+            utm_x, utm_y = gdf_utm.geometry.x[0], gdf_utm.geometry.y[0]
+            
+            # Update the gps_data with the UTM coordinates
+            gps_data[date][time] = (utm_x, utm_y)
+
+        # Delete entries with lat and lon equal to 0
+        for time in times_to_delete:
+            del gps_data[date][time]
+
+    return gps_data
     
 
 def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
@@ -150,6 +191,8 @@ def main():
     snr_data = correct_utc_in_snr(snr_data)
     print("starting get_gps")
     gps_data = get_gps(data_dir)
+    print("converting crs")
+    gps_data= convert_coords_to_utm(gps_data)
     print("starting merge_snr_mat_gps")
     full_data = merge_snr_mat_gps(snr_data, gps_data)
     print("saving output")
