@@ -116,25 +116,32 @@ def get_gps(data_dir: Path):
 def convert_coords_to_utm(gps_data: dict) -> dict:
     """
     Converts latitude and longitude in gps_data to UTM32 coordinates using GeoPandas.
-    If lat and long are 0, the entry for that second is removed.
+    Removes entries where lat or lon is '0.00000000' before transformation.
 
     args:
         gps_data (dict): GPS data in the original format.
 
     returns:
-        dict: GPS data with UTM32 coordinates, or removed entries where lat and long are 0.
+        dict: GPS data with UTM32 coordinates, or removed entries where lat or lon is '0.00000000'.
     """
-    # Iterate through the GPS data
     for date, times in gps_data.items():
-        times_to_delete = []  # Track times with lat and lon equal to 0 for deletion
+        times_to_delete = []
 
-        for time, (lat, lon) in times.items():
-            # If lat and lon are both 0, mark this entry for deletion
-            if lat == 0 and lon == 0:
+        for time, (lat_str, lon_str) in times.items():
+            # Convert coordinates from strings to floats
+            try:
+                lat = float(lat_str)
+                lon = float(lon_str)
+            except ValueError:
+                print(f"Invalid coordinates at {date}, {time}: {lat_str}, {lon_str}")
+                continue
+
+            # Skip entries where lat or lon is 0
+            if lat == 0.0 or lon == 0.0:
                 times_to_delete.append(time)
-                continue  # Skip processing this entry
+                continue
 
-            # Create a Point geometry from lat, lon if lat, lon are not 0
+            # Create a Point geometry from lon, lat
             point = Point(lon, lat)  # GeoPandas uses (longitude, latitude)
             
             # Convert to GeoDataFrame with WGS84 (EPSG:4326)
@@ -145,11 +152,11 @@ def convert_coords_to_utm(gps_data: dict) -> dict:
             
             # Extract the UTM coordinates
             utm_x, utm_y = gdf_utm.geometry.x[0], gdf_utm.geometry.y[0]
-            
-            # Update the gps_data with the UTM coordinates
-            gps_data[date][time] = (utm_x, utm_y)
 
-        # Delete entries with lat and lon equal to 0
+            # Update the gps_data with the UTM coordinates
+            gps_data[date][time] = (str(utm_x), str(utm_y))
+
+        # Delete invalid entries with lat/lon == 0
         for time in times_to_delete:
             del gps_data[date][time]
 
