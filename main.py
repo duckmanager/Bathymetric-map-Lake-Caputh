@@ -40,7 +40,7 @@ def get_snr_mat(data_dir: Path):
         mat_data_Utc = read_mat(str(snr_file)[:-4] + ".mat")["GPS"]["Utc"]
 
         data_id = snr_file.name[:-4]
-        data[data_id] = ["Utc,lat,long" + snr_header]
+        data[data_id] = ["Utc,X,Y," + snr_header]
         for snr, utc in zip(snr_data, mat_data_Utc):
             # TODO: save the snr data we need
             data[data_id].append([utc, None, None, *snr.split(",")])
@@ -83,7 +83,7 @@ def get_gps(data_dir: Path):
     find and read all gps files. parse them and build a dict.
     data = {
         "date": {
-            "time": (lat, long)
+            "time": (X, Y)
         }
     }
     """
@@ -127,28 +127,28 @@ def convert_coords_to_utm(gps_data: dict) -> dict:
     for date, times in gps_data.items():
         times_to_delete = []
 
-        for time, (lat_str, lon_str) in times.items():
+        for time, (X_str, Y_str) in times.items():
             # Convert coordinates from strings to floats
             try:
-                lat = float(lat_str)
-                lon = float(lon_str)
+                X = float(X_str) # using X and Y to avoid confusion after converting later on
+                Y = float(Y_str)
             except ValueError:
-                print(f"Invalid coordinates at {date}, {time}: {lat_str}, {lon_str}")
+                print(f"Invalid coordinates at {date}, {time}: {X_str}, {Y_str}")
                 continue
 
-            # Skip entries where lat or lon is 0
-            if lat == 0.0 or lon == 0.0:
+            # Skip entries where X or Y is 0
+            if X == 0.0 or Y == 0.0:
                 times_to_delete.append(time)
                 continue
 
-            # Create a Point geometry from lon, lat
-            point = Point(lon, lat)  # GeoPandas uses (longitude, latitude)
+            # Create a Point geometry from Y, X
+            point = Point(Y, X)  # GeoPandas uses (longitude, latitude)
             
             # Convert to GeoDataFrame with WGS84 (EPSG:4326)
             gdf = gpd.GeoDataFrame([{'geometry': point}], crs="EPSG:4326")
             
             # Transform to UTM32 (EPSG:32632)
-            gdf_utm = gdf.to_crs(epsg=32632)
+            gdf_utm = gdf.to_crs(epsg=25833)
             
             # Extract the UTM coordinates
             utm_x, utm_y = gdf_utm.geometry.x[0], gdf_utm.geometry.y[0]
@@ -156,12 +156,13 @@ def convert_coords_to_utm(gps_data: dict) -> dict:
             # Update the gps_data with the UTM coordinates
             gps_data[date][time] = (str(utm_x), str(utm_y))
 
-        # Delete invalid entries with lat/lon == 0
+        # Delete invalid entries with X/Y == 0
         for time in times_to_delete:
             del gps_data[date][time]
 
     return gps_data
-    
+
+# Egränzen der Interpolation    
 
 def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
     for snr_id_key, snr_id_value in tqdm(snr_data.items()):
@@ -178,17 +179,55 @@ def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
             date = (int(day), int(month), int(year))
             time = int(snr_point[0])
 
-            # use date and time found in snr data point to get lat and long from gps data
+            # use date and time found in snr data point to get X and Y from gps data
             try:
-                lat, long = gps_data[date][time]
+                X, Y = gps_data[date][time]
             except KeyError as e:
                 print(f"date or time not found with {date}, {time}; error: {e}")
 
 
-            # use snr_id_key to find the list we're dealing with. then use the index to find the current data point. then assign lat and long
-            snr_data[snr_id_key][index + 1][1] = lat
-            snr_data[snr_id_key][index + 1][2] = long
+            # use snr_id_key to find the list we're dealing with. then use the index to find the current data point. then assign X and Y
+            snr_data[snr_id_key][index + 1][1] = X
+            snr_data[snr_id_key][index + 1][2] = Y
     return snr_data
+
+def merge_dicts(full_data):
+    # Master-Spaltenliste (Reihenfolge beibehalten)
+    master_columns = []
+    combined_data = []
+
+    # Schritt 1: Baue die Master-Spaltenliste aus den Headers der Dicts
+    for key, nested_data in full_data.items():
+        header_columns = nested_data[0].split(",")  # Extrahiere Header aus dem ersten Element
+        for col in header_columns:
+            if col not in master_columns:
+                master_columns.append(col)  # Behalte Reihenfolge bei
+
+    # Schritt 2: Flatten und Mapping in Reihen
+    for key, nested_data in full_data.items():
+        header_columns = nested_data[0].split(",")
+        
+        for entry in nested_data[1:]:
+            if isinstance(entry, list):
+                row_data = dict(zip(header_columns, entry))
+                # Fülle fehlende Spalten mit NA, aber in korrekter Reihenfolge
+                combined_data.append({col: row_data.get(col, pd.NA) for col in master_columns})
+
+
+    # Schritt 3: Erstelle DataFrame
+    snr_dataframe = pd.DataFrame(combined_data, columns=master_columns)
+    return snr_dataframe
+
+
+def reduce_data(full_data):
+    filtered_snr = full_data[["X","Y","Depth (m)"]]
+
+    return(filtered_snr)
+
+
+
+
+
 
 def main():
     data_dir = Path("data")
@@ -202,8 +241,13 @@ def main():
     gps_data= convert_coords_to_utm(gps_data)
     print("starting merge_snr_mat_gps")
     full_data = merge_snr_mat_gps(snr_data, gps_data)
+    print("merging data")
+    full_data = merge_dicts(full_data)
+    print("filtering data")
+    selected_data = reduce_data(full_data)
     print("saving output")
-    Path("output.json").write_text(json.dumps(full_data))
+    selected_data.to_csv("snr_selected.csv", index=False)
+    full_data.to_csv("snr_collection.csv", index=False)
     input("we're all done!")
     
 
