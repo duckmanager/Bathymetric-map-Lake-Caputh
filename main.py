@@ -192,31 +192,32 @@ def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
     return snr_data
 
 def merge_dicts(full_data):
-    # Master-Spaltenliste (Reihenfolge beibehalten)
+    # Master-Columnlist to keep the order
     master_columns = []
     combined_data = []
 
-    # Schritt 1: Baue die Master-Spaltenliste aus den Headers der Dicts
+    # Assign headers to the list
     for key, nested_data in full_data.items():
-        header_columns = nested_data[0].split(",")  # Extrahiere Header aus dem ersten Element
+        header_columns = nested_data[0].split(",")  # Extract headers
         for col in header_columns:
             if col not in master_columns:
-                master_columns.append(col)  # Behalte Reihenfolge bei
+                master_columns.append(col)  # keep order
 
-    # Schritt 2: Flatten und Mapping in Reihen
+    # fill with values
     for key, nested_data in full_data.items():
         header_columns = nested_data[0].split(",")
         
         for entry in nested_data[1:]:
             if isinstance(entry, list):
                 row_data = dict(zip(header_columns, entry))
-                # Fülle fehlende Spalten mit NA, aber in korrekter Reihenfolge
+                # assing NA to missing values
                 combined_data.append({col: row_data.get(col, pd.NA) for col in master_columns})
 
 
-    # Schritt 3: Erstelle DataFrame
+    # create geopanda dataframe
     snr_dataframe = pd.DataFrame(combined_data, columns=master_columns)
     return snr_dataframe
+
 
 
 def reduce_data(full_data):
@@ -246,8 +247,8 @@ def main():
     print("filtering data")
     selected_data = reduce_data(full_data)
     print("saving output")
-    selected_data.to_csv("snr_selected.csv", index=False)
-    full_data.to_csv("snr_collection.csv", index=False)
+    #selected_data.to_csv("snr_selected.csv", index=False)
+    #full_data.to_csv("snr_collection.csv", index=False)
     input("we're all done!")
     
 
