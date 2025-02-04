@@ -162,7 +162,10 @@ def convert_coords_to_utm(gps_data: dict) -> dict:
 
     return gps_data
 
-# Egränzen der Interpolation    
+
+#####
+# Ergränzen der Interpolation    
+#####
 
 def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
     for snr_id_key, snr_id_value in tqdm(snr_data.items()):
@@ -210,13 +213,64 @@ def merge_dicts(full_data):
         for entry in nested_data[1:]:
             if isinstance(entry, list):
                 row_data = dict(zip(header_columns, entry))
-                # assing NA to missing values
+                # assign NA to missing values
+                row_data["Survey_ID"] = key  # Füge die Survey-ID hinzu
                 combined_data.append({col: row_data.get(col, pd.NA) for col in master_columns})
 
-
     # create geopanda dataframe
+    master_columns.insert(1, "Survey_ID")  # Survey_ID an zweiter Stelle einfügen
     snr_dataframe = pd.DataFrame(combined_data, columns=master_columns)
     return snr_dataframe
+
+
+
+def detect_and_remove_faulty_depths(snr_dataframe: pd.DataFrame, window_size: int = 10, threshold: float = 4.0):
+    """
+    Identifiziert fehlerhafte Tiefenwerte in den SNR-Daten innerhalb derselben Surveys basierend auf dem Durchschnitt
+    eines gleitenden Fensters und speichert diese Werte in einem GeoDataFrame.
+
+    Args:
+        snr_dataframe (DataFrame): Der GeoDataFrame mit SNR-Daten.
+        window_size (int): Größe des gleitenden Fensters zur Durchschnittsberechnung.
+        threshold (float): Maximale Abweichung in Metern, bevor ein Wert als fehlerhaft gilt.
+
+    Returns:
+        snr_dataframe (DataFrame): Aktualisiertes DataFrame ohne fehlerhafte Werte.
+        faulty_df (GeoDataFrame): GeoDataFrame mit den fehlerhaften Werten.
+    """
+    faulty_entries = []  # Zum Speichern der fehlerhaften Werte
+    faulty_indices = []  # Liste zum Speichern der zu löschenden Indizes
+
+    # Iteriere durch die Surveys
+    for survey_id, group in snr_dataframe.groupby("Survey_ID"):
+        depths = group["Depth (m)"].tolist()
+        indices = group.index.tolist()
+
+        # Iteriere durch Tiefenwerte und prüfe auf fehlerhafte Einträge
+        for i in range(len(depths)):
+            current_depth = depths[i]
+            start_idx = max(0, i - window_size // 2)
+            end_idx = min(len(depths), i + window_size // 2 + 1)
+
+            # Berechne Durchschnitt der benachbarten Tiefenwerte
+            window_depths = depths[start_idx:end_idx]
+            avg_depth = sum(window_depths) / len(window_depths)
+
+            # Prüfen, ob der aktuelle Wert außerhalb des erlaubten Bereichs liegt
+            if abs(current_depth - avg_depth) > threshold:
+                entry = snr_dataframe.loc[indices[i]].to_dict()
+                faulty_entries.append(entry)
+                faulty_indices.append(indices[i])
+
+    # Lösche fehlerhafte Einträge gesammelt nach der Iteration
+    snr_dataframe.drop(faulty_indices, inplace=True)
+
+    # Erstelle GeoDataFrame aus den fehlerhaften Einträgen
+    faulty_df = gpd.GeoDataFrame(faulty_entries, geometry=gpd.points_from_xy(
+        [entry["X"] for entry in faulty_entries], [entry["Y"] for entry in faulty_entries]
+    ), crs="EPSG:25833")
+
+    return snr_dataframe, faulty_df
 
 
 
@@ -243,12 +297,15 @@ def main():
     print("starting merge_snr_mat_gps")
     full_data = merge_snr_mat_gps(snr_data, gps_data)
     print("merging data")
-    full_data = merge_dicts(full_data)
-    print("filtering data")
-    selected_data = reduce_data(full_data)
+    snr_full_dataframe = merge_dicts(full_data)
+    print("detecting and removing faulty depths")
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(snr_full_dataframe)
+    print("reducing data")
+    selected_data = reduce_data(filtered_data)
     print("saving output")
-    #selected_data.to_csv("snr_selected.csv", index=False)
-    #full_data.to_csv("snr_collection.csv", index=False)
+    selected_data.to_csv("snr_selected_filtered.csv", index=False)
+    snr_full_dataframe.to_csv("snr_collection_filtered.csv", index=False)
+    faulty_data.to_csv("snr_collection.csv", index=False)
     input("we're all done!")
     
 
