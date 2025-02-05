@@ -1,14 +1,14 @@
 from pathlib import Path
 import pandas as pd
 import geopandas as gpd
+import shapely
 from pymatreader import read_mat
 from datetime import datetime, timedelta
-from shapely.geometry import Point
 from tqdm import tqdm
 import json 
 
 # add argparse
-def get_snr_mat(data_dir: Path):
+def create_dataframe(data_dir: Path):
     """
     find and read all snr and mat files. match them and build a dict.
     data = {
@@ -25,60 +25,198 @@ def get_snr_mat(data_dir: Path):
         ...
     }
 
-
     args:
         data_dir Path: Path object pointing to dir with data files
 
     returns:
         data dict as laid out above
     """
-    data = {}
-    for snr_file in tqdm(data_dir.glob("*.snr")):
-        snr_data_raw = snr_file.read_text().splitlines()
-        snr_data = snr_data_raw[1:]
-        snr_header = snr_data_raw[0]
 
-        mat_data_Utc = read_mat(str(snr_file)[:-4] + ".mat")["GPS"]["Utc"]
+    # TODO: scan all snr files for max number of CellXX needed
+    # TODO: create pandas dataframe with propper headers like so:
+    """
+    {
+        "file_id": [ ids_as_int ],
+        "Utc": [ empty_for_now ],
+        "Lat": [ empty_for_now ],
+        "Long": [ empty_for_now ],
+        "Sample": [ index_as_int ],
+        "Date/Time": [ as_str ],
+        "CellXX": [ data_as_float ],
+        ... account for number of cells gathered previously
+    }
+    """
+    # TODO: walk all snr and corresponding mat files.
+    #   match and put them into the dataframe.
 
-        data_id = snr_file.name[:-4]
-        data[data_id] = ["Utc,X,Y," + snr_header]
-        for snr, utc in zip(snr_data, mat_data_Utc):
-            # TODO: save the snr data we need
-            data[data_id].append([utc, None, None, *snr.split(",")])
-    return data
+
+        # recognize file with the longest header
+    longest_file = max(data_dir.glob("*.snr"), key=lambda f: len(f.read_text().splitlines()[0]), default=None)
+    
+    # create geodataframe with longest header variables + extra columns("file_id", "Utc", "Lat", "Long")
+    header = None
+    with longest_file.open("r") as file:
+        snr_header = file.readline().strip().split(",")
+
+    # assign additional columns not present in snr files
+    additional_columns = ["file_id", "Utc", "Lat", "Long"]
+   
+    # create dataframe - maybe assign geometry columns and crs later when converting to geodataframe - or smarter to do now?
+    snr_dataframe = pd.DataFrame(columns=additional_columns + snr_header)
+
+    return(snr_dataframe, snr_header)
+
+
+# function to correct utc timeline of sonar-GPS
+####### maybe change later to keeping the .sec
+
+
+def correct_utc(utc_list):
+    # find first time point
+    first_valid_utc = next((utc for utc in utc_list if isinstance(utc, (int, float))), None)
+
+    # return if no valid time found
+    if first_valid_utc is None:
+        print("Invalid UTC list!")
+        return utc_list
+
+    # Überprüfe, ob der erste gültige Zeitstempel nicht der erste Eintrag ist
+    #if utc_list.index(first_valid_utc) != 0:
+    #    print(f"Important Warning: used utc-list starts with invalid point - allocation of utc time is faulty - need to fix ") # add possibility to detect where it started and interpoalte forwards and backwards in time
+
+    # start_time based on first time stamp
+    start_time = datetime.strptime(str(int(first_valid_utc)).zfill(6), "%H%M%S")
+
+    # create corrected time line, beginning with first time stamp and same length as orginal time line
+    corrected_utc_pre = [start_time + timedelta(seconds=i) for i in range(len(utc_list))]
+
+    # transform back to HHMMSS format
+    corrected_utc = [t.strftime("%H%M%S") for t in corrected_utc_pre]
+
+    return corrected_utc
 
 
 
-# Correct the timestamps to full second steps
-# maybe need to adjust for sub seconds - then interpolate the GNS tracks
-def correct_utc_in_snr(snr_data: dict):
-    for data_id, entries in snr_data.items():
-        # Extract first and last time stamp
-        utc_times = [int(entry[0]) for entry in entries[1:] if isinstance(entry, list) and entry]
-        
-        if not utc_times:
-            continue  # skip if no timestamps avaiable
+# Assign snr and UTC data to dataframe
+def assign_data_to_dataframe(data_dir: Path, snr_dataframe: pd.DataFrame, snr_header: list):
+    data_list = []
 
-        # transform UTC to datetime-object
-        start_time = datetime.strptime(str(utc_times[0]), "%H%M%S")
-        end_time = datetime.strptime(str(utc_times[-1]), "%H%M%S")
-        
-        # count of time steps to fill
-        num_steps = len(utc_times)
-        
-        # create new list with setps in seconds
-        corrected_utc = [start_time + timedelta(seconds=i) for i in range(num_steps)]
-        
-        # transform back to HHMMSS format
-        corrected_utc_str = [t.strftime("%H%M%S") for t in corrected_utc]
+    # Iterate through SNR-files
+    for file in data_dir.glob("*.snr"):
+        file_id = file.stem  # Dateiname als file_id
 
-        # correct snr_data with new time series
-        for i, entry in enumerate(entries[1:]):
-            if isinstance(entry, list) and entry:
-                entry[0] = corrected_utc_str[i] 
+        # read same .mat file as snr file
+        mat_file = data_dir / f"{file_id}.mat"
+        if mat_file.exists():
+            mat_data = read_mat(str(mat_file))
+            raw_utc = mat_data.get("GPS", {}).get("Utc", []) #extract .mat data
+            corrected_utc = correct_utc(raw_utc if isinstance(raw_utc, list) else raw_utc.flatten()) # get corrected timeline
+        else:
+            print("Warrning: Mat-file -{file_id}.mat- ")  # Error if .mat-file not found
 
-    return snr_data
+        with file.open("r") as f:
+            lines = f.readlines()
 
+        # extract data
+        for i, line in enumerate(lines[1:]):  # skip header
+            values = line.strip().split(",")
+            row_dict = dict(zip(snr_header, values))  # assign values to columns
+            row_dict.update({
+                "file_id": file_id,
+                "Utc": corrected_utc[i] if i < len(corrected_utc) else None,
+                "Lat": None,
+                "Long": None # getting assigned later
+            })  
+            data_list.append(row_dict)
+
+    # put data in dataframe - is it a new dataframe?
+    snr_dataframe = pd.DataFrame(data_list, columns=snr_dataframe.columns)
+
+    return snr_dataframe
+
+
+
+def get_gps_dataframe(data_dir: Path):
+    gps_data_list = []
+
+    for gps_file in tqdm(data_dir.glob("*.txt")):
+        gps_data = gps_file.read_text().splitlines()
+        bestposa = (None, None)  # Variable to safe lat long tuple
+
+        for line in gps_data:
+            # update when new bestposa is reached
+            if line.startswith("#BESTPOSA"):
+                bestposa_raw = line.split(",")
+                if bestposa_raw[10].replace(".", "").isdigit():
+                    bestposa = (bestposa_raw[10], bestposa_raw[11])
+                else:
+                    bestposa = (bestposa_raw[11], bestposa_raw[12])
+
+            # Koppeln des aktuellen bestposa mit der nächsten GPZDA-Zeile
+            elif line.startswith("$GPZDA"):
+                try:
+                    _, time, day, month, year, *_ = line.split(",")
+                    date = (int(day), int(month), int(year))
+
+                    # Speichere die aktuelle Position mit dem Zeitstempel
+                    gps_data_list.append({
+                        "date": date,
+                        "utc": int(float(time)),
+                        "lat": bestposa[0],   # Aktueller bestposa
+                        "long": bestposa[1]
+                    })
+                except ValueError as e:
+                    print(f"Fehler beim Parsen von GPZDA in Datei {gps_file.name}: {e}")
+
+    # Umwandeln in DataFrame
+    gps_df = pd.DataFrame(gps_data_list)
+    return gps_df
+
+
+
+
+# merge external GPS data and snr_dataframe based on date and GPS-retrieved-UTC
+
+def merge_snr_gps(snr_dataframe: pd.DataFrame, gps_dataframe: pd.DataFrame):
+    # Extract date from the 'Date/Time' column
+    snr_dataframe['date'] = pd.to_datetime(snr_dataframe['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
+    
+    # Extract day, month, year and safe as touple
+    snr_dataframe['date'] = snr_dataframe['date'].apply(lambda x: (x.day, x.month, x.year) if pd.notnull(x) else None)
+
+    # convert both utc to int 64 - maybe better fix in earlyer parts
+    snr_dataframe['Utc'] = pd.to_numeric(snr_dataframe['Utc'], errors='coerce').astype('Int64')
+    gps_dataframe['utc'] = pd.to_numeric(gps_dataframe['utc'], errors='coerce').astype('Int64')
+
+    # merge both dataframes based on utc and date , by 'left'- merge the gps_dataframe is the important to stay
+    merged_df = snr_dataframe.merge(gps_dataframe, how='left', left_on=['date', 'Utc'], right_on=['date', 'utc'])
+
+    # put lat long in already created columns - propably cleaner way
+    merged_df['Lat'] = merged_df['lat']
+    merged_df['Long'] = merged_df['long']
+
+    # delete temporary columns
+    merged_dataframe = merged_df.drop(columns=['lat', 'long', 'utc', 'date'])
+
+    return merged_dataframe
+
+
+def convert_to_utm_geodf(merged_dataframe: pd.DataFrame):
+     # turn pd.dataframe into geopanda.dataframe
+     geodf = gpd.GeoDataFrame(merged_dataframe.drop(['Lat', 'Long'], axis=1),
+                       crs={'init': 'epsg:4326'},
+                       geometry=merged_dataframe.apply(lambda row: shapely.geometry.Point((row.Lat, row.Long)), axis=1)) 
+     
+     # project geodataframe to local UTM 33N (epsg:25833)
+     geodf_projected = geodf.to_crs(epsg=25833)
+     return(geodf_projected)
+
+
+# no long lat or x y column, just geometry - maybe extract to keep columns?
+
+
+
+# old
 def get_gps(data_dir: Path):
     """
     find and read all gps files. parse them and build a dict.
@@ -289,27 +427,34 @@ def reduce_data(full_data):
 
 def main():
     data_dir = Path("data")
-    print("starting get_snr_mat")
-    snr_data = get_snr_mat(data_dir)
-    print("correcting utc timestamps in snr")
-    snr_data = correct_utc_in_snr(snr_data)
+    print("starting to create empty dataframe")
+    snr_dataframe_empty, snr_header = create_dataframe(data_dir)
+    print("assigning data to dataframe and correcting sonar-GPS times")
+    snr_dataframe = assign_data_to_dataframe(data_dir, snr_dataframe_empty, snr_header)
+    #print("correcting utc timestamps in snr")
+    #snr_data = correct_utc_in_snr(snr_data)
     print("starting get_gps")
-    gps_data = get_gps(data_dir)
-    print("converting crs")
-    gps_data= convert_coords_to_utm(gps_data)
-    print("starting merge_snr_mat_gps")
-    full_data = merge_snr_mat_gps(snr_data, gps_data)
-    print("merging data")
-    snr_full_dataframe = merge_dicts(full_data)
-    print("detecting and removing faulty depths")
-    filtered_data, faulty_data = detect_and_remove_faulty_depths(snr_full_dataframe)
-    print("reducing data")
-    selected_data = reduce_data(filtered_data)
-    print("saving output")
-    selected_data.to_csv("snr_selected_filtered.csv", index=False)
-    snr_full_dataframe.to_csv("snr_collection_filtered.csv", index=False)
-    faulty_data.to_csv("snr_collection.csv", index=False)
-    input("we're all done!")
+    gps_dataframe = get_gps_dataframe(data_dir)
+    print("merging GPS and snr data")
+    merged_dataframe = merge_snr_gps(snr_dataframe, gps_dataframe)
+    print("converting to geodataframe and projecting to UTM 33N")
+    geodataframe = convert_to_utm_geodf(merged_dataframe)
+    #print("converting crs")
+    #gps_data= convert_coords_to_utm(gps_data)
+    #print("starting merge_snr_mat_gps")
+    #full_data = merge_snr_mat_gps(snr_data, gps_data)
+    #print("merging data")
+    #snr_full_dataframe = merge_dicts(full_data)
+    #print("detecting and removing faulty depths")
+    #filtered_data, faulty_data = detect_and_remove_faulty_depths(snr_full_dataframe)
+    #print("reducing data")
+    #selected_data = reduce_data(filtered_data)
+    #print("saving output")
+    #output_path = Path("ouput")
+    #selected_data.to_csv(output_path / "snr_selected_filtered.csv", index=False)
+    #snr_full_dataframe.to_csv(output_path / "snr_collection_filtered.csv", index=False)
+    #faulty_data.to_csv(output_path / "snr_collection.csv", index=False)
+    #input("we're all done!")
     
 
 main()
