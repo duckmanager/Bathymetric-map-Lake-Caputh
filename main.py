@@ -25,6 +25,7 @@ def get_snr_mat(data_dir: Path):
         ...
     }
 
+
     args:
         data_dir Path: Path object pointing to dir with data files
 
@@ -124,7 +125,7 @@ def convert_coords_to_utm(gps_data: dict) -> dict:
     returns:
         dict: GPS data with UTM32 coordinates, or removed entries where lat or lon is '0.00000000'.
     """
-    for date, times in gps_data.items():
+    for date, times in tqdm(gps_data.items()):
         times_to_delete = []
 
         for time, (X_str, Y_str) in times.items():
@@ -196,7 +197,7 @@ def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
 
 def merge_dicts(full_data):
     # Master-Columnlist to keep the order
-    master_columns = []
+    master_columns = ["Survey_ID"]
     combined_data = []
 
     # Assign headers to the list
@@ -212,19 +213,21 @@ def merge_dicts(full_data):
         
         for entry in nested_data[1:]:
             if isinstance(entry, list):
-                row_data = dict(zip(header_columns, entry))
                 # assign NA to missing values
+                row_data = dict(zip(header_columns, entry))
                 row_data["Survey_ID"] = key  # Füge die Survey-ID hinzu
                 combined_data.append({col: row_data.get(col, pd.NA) for col in master_columns})
 
+    # Survey_ID an zweiter Stelle einfügen
+    if "Survey_ID" not in master_columns:
+        master_columns.insert(1, "Survey_ID")
     # create geopanda dataframe
-    master_columns.insert(1, "Survey_ID")  # Survey_ID an zweiter Stelle einfügen
     snr_dataframe = pd.DataFrame(combined_data, columns=master_columns)
     return snr_dataframe
 
 
 
-def detect_and_remove_faulty_depths(snr_dataframe: pd.DataFrame, window_size: int = 10, threshold: float = 4.0):
+def detect_and_remove_faulty_depths(snr_dataframe: pd.DataFrame, window_size: int = 10, threshold: float = 1.0):
     """
     Identifiziert fehlerhafte Tiefenwerte in den SNR-Daten innerhalb derselben Surveys basierend auf dem Durchschnitt
     eines gleitenden Fensters und speichert diese Werte in einem GeoDataFrame.
