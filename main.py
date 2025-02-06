@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from tqdm import tqdm
 import json 
 
-# add argparse
+# create dataframe
 def create_dataframe(data_dir: Path):
 
         # recognize file with the longest header
@@ -261,9 +261,9 @@ def main():
     print("merging GPS and snr data")
     merged_dataframe = merge_snr_gps(snr_dataframe, gps_dataframe)
     print("converting to geodataframe and projecting to UTM 33N")
-    geodataframe = convert_to_utm_geodf(merged_dataframe)
+    geodataframe_snr = convert_to_utm_geodf(merged_dataframe)
     print("detecting and removing faulty depths")
-    filtered_data, faulty_data = detect_and_remove_faulty_depths(geodataframe)
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(geodataframe_snr)
     print("reducing data")
     selected_snr_data, selected_faulty_snr_data = reduce_data(filtered_data, faulty_data)
     print("saving output")

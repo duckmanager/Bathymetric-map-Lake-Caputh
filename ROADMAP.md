@@ -1,0 +1,6 @@
+- [ ] add requirements.txt
+- [ ] add setup instructions
+- [ ] add some general docs
+- [ ] add readme
+- [ ] add license
+- [ ] add .cff for citations
