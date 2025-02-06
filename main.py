@@ -2,6 +2,7 @@ from pathlib import Path
 import pandas as pd
 import geopandas as gpd
 import shapely
+import numpy as np
 from pymatreader import read_mat
 from datetime import datetime, timedelta
 from tqdm import tqdm
@@ -62,7 +63,11 @@ def create_dataframe(data_dir: Path):
     additional_columns = ["file_id", "Utc", "Lat", "Long"]
    
     # create dataframe - maybe assign geometry columns and crs later when converting to geodataframe - or smarter to do now?
+
     snr_dataframe = pd.DataFrame(columns=additional_columns + snr_header)
+
+    # specify data type - add more if necessary
+    snr_dataframe =snr_dataframe.astype({"Depth (m)": float})
 
     return(snr_dataframe, snr_header)
 
@@ -152,23 +157,23 @@ def get_gps_dataframe(data_dir: Path):
                 else:
                     bestposa = (bestposa_raw[11], bestposa_raw[12])
 
-            # Koppeln des aktuellen bestposa mit der nächsten GPZDA-Zeile
+            # couple Bestposa with next GPZDA line
             elif line.startswith("$GPZDA"):
                 try:
                     _, time, day, month, year, *_ = line.split(",")
                     date = (int(day), int(month), int(year))
 
-                    # Speichere die aktuelle Position mit dem Zeitstempel
+                    # save current position with time stamp
                     gps_data_list.append({
                         "date": date,
                         "utc": int(float(time)),
-                        "lat": bestposa[0],   # Aktueller bestposa
+                        "lat": bestposa[0],  
                         "long": bestposa[1]
                     })
                 except ValueError as e:
                     print(f"Fehler beim Parsen von GPZDA in Datei {gps_file.name}: {e}")
 
-    # Umwandeln in DataFrame
+    # turn into dataframe
     gps_df = pd.DataFrame(gps_data_list)
     return gps_df
 
@@ -215,8 +220,70 @@ def convert_to_utm_geodf(merged_dataframe: pd.DataFrame):
 # no long lat or x y column, just geometry - maybe extract to keep columns?
 
 
+# filter faulty points
+def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_size: int = 10, threshold: float = 1.0):
+    """
+    Identifiziert fehlerhafte Tiefenwerte in den SNR-Daten innerhalb derselben Surveys basierend auf dem Durchschnitt
+    eines gleitenden Fensters und speichert diese Werte in einem GeoDataFrame.
 
-# old
+    Args:
+        snr_dataframe (DataFrame): Der GeoDataFrame mit SNR-Daten.
+        window_size (int): Größe des gleitenden Fensters zur Durchschnittsberechnung.
+        threshold (float): Maximale Abweichung in Metern, bevor ein Wert als fehlerhaft gilt.
+
+    Returns:
+        snr_dataframe (DataFrame): Aktualisiertes DataFrame ohne fehlerhafte Werte.
+        faulty_df (GeoDataFrame): GeoDataFrame mit den fehlerhaften Werten.
+    """
+    faulty_entries = []  # Zum Speichern der fehlerhaften Werte
+    faulty_indices = []  # Liste zum Speichern der zu löschenden Indizes
+
+    geodf_projected['Depth (m)'] = pd.to_numeric(geodf_projected['Depth (m)'])
+
+
+
+    # Iteriere durch die Surveys
+    for file_id, group in geodf_projected.groupby("file_id"):
+        depths = group["Depth (m)"].tolist()
+        indices = group.index.tolist()
+
+        # Iteriere durch Tiefenwerte und prüfe auf fehlerhafte Einträge
+        for i in range(len(depths)):
+            current_depth = depths[i]
+            start_idx = max(0, i - window_size // 2)
+            end_idx = min(len(depths), i + window_size // 2 + 1)
+
+            # Berechne Durchschnitt der benachbarten Tiefenwerte
+            window_depths = (depths[start_idx:end_idx])
+            avg_depth = sum(window_depths) / int(len(window_depths))
+
+            # Prüfen, ob der aktuelle Wert außerhalb des erlaubten Bereichs liegt
+            if abs(current_depth - avg_depth) > threshold:
+                entry = geodf_projected.loc[indices[i]].to_dict()
+                faulty_entries.append(entry)
+                faulty_indices.append(indices[i])
+
+    # Lösche fehlerhafte Einträge gesammelt nach der Iteration
+    geodf_projected.drop(faulty_indices, inplace=True)
+
+    # Erstelle GeoDataFrame aus den fehlerhaften Einträgen
+    faulty_gdf = gpd.GeoDataFrame(faulty_entries, geometry='geometry', crs="EPSG:25833")
+
+    return geodf_projected, faulty_gdf
+
+# reduce columns to necessary for map creation
+def reduce_data(geodf_projected, faulty_gdf):
+    filtered_gdf_snr = geodf_projected[["geometry","Depth (m)"]]
+    filtered_faulty_gdf_snr = faulty_gdf[["geometry","Depth (m)"]]
+
+
+    return(filtered_gdf_snr, filtered_faulty_gdf_snr)
+
+
+
+
+
+#    -- -  - - -  - - -old
 def get_gps(data_dir: Path):
     """
     find and read all gps files. parse them and build a dict.
@@ -305,7 +372,7 @@ def convert_coords_to_utm(gps_data: dict) -> dict:
 #####
 # Ergränzen der Interpolation    
 #####
-
+#old
 def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
     for snr_id_key, snr_id_value in tqdm(snr_data.items()):
         # get key and value of the snr_data dict
@@ -332,7 +399,7 @@ def merge_snr_mat_gps(snr_data: dict, gps_data: dict):
             snr_data[snr_id_key][index + 1][1] = X
             snr_data[snr_id_key][index + 1][2] = Y
     return snr_data
-
+#old
 def merge_dicts(full_data):
     # Master-Columnlist to keep the order
     master_columns = ["Survey_ID"]
@@ -364,8 +431,8 @@ def merge_dicts(full_data):
     return snr_dataframe
 
 
-
-def detect_and_remove_faulty_depths(snr_dataframe: pd.DataFrame, window_size: int = 10, threshold: float = 1.0):
+#old
+def detect_and_remove_faulty_depths2(snr_dataframe: pd.DataFrame, window_size: int = 10, threshold: float = 1.0):
     """
     Identifiziert fehlerhafte Tiefenwerte in den SNR-Daten innerhalb derselben Surveys basierend auf dem Durchschnitt
     eines gleitenden Fensters und speichert diese Werte in einem GeoDataFrame.
@@ -414,8 +481,8 @@ def detect_and_remove_faulty_depths(snr_dataframe: pd.DataFrame, window_size: in
     return snr_dataframe, faulty_df
 
 
-
-def reduce_data(full_data):
+#old
+def reduce_data2(full_data):
     filtered_snr = full_data[["X","Y","Depth (m)"]]
 
     return(filtered_snr)
@@ -445,16 +512,18 @@ def main():
     #full_data = merge_snr_mat_gps(snr_data, gps_data)
     #print("merging data")
     #snr_full_dataframe = merge_dicts(full_data)
-    #print("detecting and removing faulty depths")
-    #filtered_data, faulty_data = detect_and_remove_faulty_depths(snr_full_dataframe)
-    #print("reducing data")
-    #selected_data = reduce_data(filtered_data)
-    #print("saving output")
-    #output_path = Path("ouput")
-    #selected_data.to_csv(output_path / "snr_selected_filtered.csv", index=False)
-    #snr_full_dataframe.to_csv(output_path / "snr_collection_filtered.csv", index=False)
-    #faulty_data.to_csv(output_path / "snr_collection.csv", index=False)
-    #input("we're all done!")
+    print("detecting and removing faulty depths")
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(geodataframe)
+    print("reducing data")
+    selected_snr_data, selected_faulty_snr_data = reduce_data(filtered_data, faulty_data)
+    print("saving output")
+    output_path = Path("output")
+    selected_snr_data.to_csv(output_path / "snr_selected_filtered_new.csv", index=False)
+    filtered_data.to_csv(output_path / "snr_collection_filtered_new.csv", index=False)
+    faulty_data.to_csv(output_path / "snr_errors_collection.csv", index=False)
+    selected_faulty_snr_data.to_csv(output_path / "snr_errors_selected.csv", index=False)
+
+    input("we're all done!")
     
 
 main()
