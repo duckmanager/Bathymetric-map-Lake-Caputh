@@ -6,7 +6,7 @@ import numpy as np
 from pymatreader import read_mat
 from datetime import datetime, timedelta
 from tqdm import tqdm
-import json 
+
 
 # create dataframe
 def create_dataframe(data_dir: Path):
@@ -50,13 +50,13 @@ def correct_utc(utc_list):
     #    print(f"Important Warning: used utc-list starts with invalid point - allocation of utc time is faulty - need to fix ") # add possibility to detect where it started and interpoalte forwards and backwards in time
 
     # start_time based on first time stamp
-    start_time = datetime.strptime(str(int(first_valid_utc)).zfill(6), "%H%M%S")
+    start_time = datetime.strptime(str(int(first_valid_utc)).zfill(6), "%H%M%S%f")
 
     # create corrected time line, beginning with first time stamp and same length as orginal time line
     corrected_utc_pre = [start_time + timedelta(seconds=i) for i in range(len(utc_list))]
 
-    # transform back to HHMMSS format
-    corrected_utc = [t.strftime("%H%M%S") for t in corrected_utc_pre]
+    # transform back to HHMMSS format - [:-5] to shorten the decimal place to 1/10 of second
+    corrected_utc = [t.strftime("%H%M%S.%f")[:-5] for t in corrected_utc_pre]
 
     return corrected_utc
 
@@ -100,7 +100,7 @@ def assign_data_to_dataframe(data_dir: Path, snr_dataframe: pd.DataFrame, snr_he
     return snr_dataframe
 
 
-
+# load external GPS data and transform to UTM33N
 def get_gps_dataframe(data_dir: Path):
     gps_data_list = []
 
@@ -135,11 +135,130 @@ def get_gps_dataframe(data_dir: Path):
 
     # turn into dataframe
     gps_df = pd.DataFrame(gps_data_list)
-    return gps_df
+
+
+    # turn into geodataframe to project to UTM33N
+    gps_geodf = gpd.GeoDataFrame(gps_df,
+        crs='EPSG:4326',
+        geometry=gpd.points_from_xy(gps_df.long, gps_df.lat)) # different opinions which variant is more performant
+     
+     # project geodataframe to local UTM 33N (epsg:25833)
+    gps_geodf_projected = gps_geodf.to_crs(epsg=25833)
+    return gps_geodf_projected
+
+
+# erneute Aufteilung in dicts anch datum -  ggf. doch besser vor der beim Einlesen innseperaten files zu machen, damit auch umehrere an einem Tag kein Problem ist
+# interpolate coords for missing .sec values
+def create_interpolated_coords(snr_df, gps_gdf):
+    interpolated_coords = []
+
+    # shorten Date/Time to only date in same format as in gps-files
+    snr_df['date'] = pd.to_datetime(snr_df['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
+    snr_df['date'] = snr_df['date'].apply(lambda x: (x.day, x.month, x.year) if pd.notnull(x) else None)
+
+    # fails when using - but in general not necessary, only for different gps format
+    # gps_gdf['date'] = gps_gdf['date'].apply(lambda x: (x.day, x.month, x.year))
+
+    # Iterate through gps file to safe same dates in one nested dict, to iterate more easy later
+    gps_dict = {date: df for date, df in gps_gdf.groupby('date')}
+
+    # Iteriere through gps data
+    for idx, row in tqdm(snr_df.iterrows(), total=snr_df.shape[0]):
+        date = row['date']  
+        utc_full = row['Utc']  # Format HHMMSS.1
+
+        # Seperate time from .second - part
+        utc_str, decimal_str = utc_full.split('.')
+        decimal_part = int(decimal_str)
+
+        # access gps data from same day
+        gps_day = gps_dict.get(date)
+        if gps_day is None:
+            interpolated_coords.append((None, None))
+            continue
+
+        # find neighbour gps points -> can be eliminated as they are always consecutive, but maybe more reliant like this?
+        utc_int = int(utc_str)
+        before_point = gps_day[gps_day['utc'] == utc_int]
+        after_point = gps_day[gps_day['utc'] == utc_int + 1]
+
+        # If datapoint is exaxtly .0 - keep coordinates
+        if decimal_part == 0 and not before_point.empty:
+            interpolated_coords.append((before_point.iloc[0].geometry.x, before_point.iloc[0].geometry.y))
+            continue
+
+        # safe NA if no neighbour points can be found
+        if before_point.empty or after_point.empty:
+            interpolated_coords.append((None, None))
+            continue
+
+        # Interpolation of coordinates based on decimal place - procedure like vector calculation
+        interp_factor = decimal_part / 10.0
+        x_interp = before_point.iloc[0].geometry.x + interp_factor * (after_point.iloc[0].geometry.x - before_point.iloc[0].geometry.x)
+        y_interp = before_point.iloc[0].geometry.y + interp_factor * (after_point.iloc[0].geometry.y - before_point.iloc[0].geometry.y)
+
+        interpolated_coords.append((x_interp, y_interp))
+
+    # Add interpoalted coords to dataframe
+    snr_df['Interpolated_Long'] = [coord[0] for coord in interpolated_coords]
+    snr_df['Interpolated_Lat'] = [coord[1] for coord in interpolated_coords]
+
+    return snr_df
+
+    
+
+
+
+# old version
+
+"""    for idx, row in tqdm(snr_df.iterrows(), total=snr_df.shape[0]):
+        date = row['date']  # Bereits ein Tupel (Tag, Monat, Jahr)
+        utc_full = row['Utc']  # Format HHMMSS.1
+
+        # Trenne Zeit in volle Sekunde und Nachkommastelle
+        utc_str, decimal_str = utc_full.split('.')
+        decimal_part = int(decimal_str)
+
+        # Filter GPS-Daten nach Datum und erstelle eine Kopie
+        gps_day = gps_gdf[gps_gdf['date'] == date].copy()
+        if gps_day.empty:
+            interpolated_coords.append((None, None))
+            continue
+
+        # Finde die benachbarten GPS-Punkte basierend auf UTC-Zeit
+        before_point = gps_day[gps_day['utc'] == int(utc_str)].copy()
+        after_point = gps_day[gps_day['utc'] == int(utc_str) + 1].copy()
+
+        # Falls exakter GPS-Zeitpunkt vorhanden ist
+        if decimal_part == 0 and not before_point.empty:
+            interpolated_coords.append((before_point.iloc[0].geometry.x, before_point.iloc[0].geometry.y))
+            continue
+
+        # Falls keine benachbarten Punkte gefunden werden
+        if before_point.empty or after_point.empty:
+            interpolated_coords.append((None, None))
+            continue
+
+        # Interpolation der Koordinaten basierend auf Nachkommastelle
+        interp_factor = decimal_part / 10.0
+        x_interp = before_point.iloc[0].geometry.x + interp_factor * (after_point.iloc[0].geometry.x - before_point.iloc[0].geometry.x)
+        y_interp = before_point.iloc[0].geometry.y + interp_factor * (after_point.iloc[0].geometry.y - before_point.iloc[0].geometry.y)
+
+        interpolated_coords.append((x_interp, y_interp))
+
+    # Interpolierte Koordinaten dem DataFrame hinzufügen
+    snr_df['Interpolated_Long'] = [coord[0] for coord in interpolated_coords]
+    snr_df['Interpolated_Lat'] = [coord[1] for coord in interpolated_coords]
+
+    return snr_df"""
 
 
 
 
+
+
+
+# not necessary anymore as already merged
 # merge external GPS data and snr_dataframe based on date and GPS-retrieved-UTC
 def merge_snr_gps(snr_dataframe: pd.DataFrame, gps_dataframe: pd.DataFrame):
     # Extract date from the 'Date/Time' column
@@ -164,7 +283,7 @@ def merge_snr_gps(snr_dataframe: pd.DataFrame, gps_dataframe: pd.DataFrame):
 
     return merged_dataframe
 
-
+# not necessary anymore
 def convert_to_utm_geodf(merged_dataframe: pd.DataFrame):
      # turn pd.dataframe into geopanda.dataframe
      geodf = gpd.GeoDataFrame(merged_dataframe.drop(['Lat', 'Long'], axis=1),
@@ -241,14 +360,6 @@ def reduce_data(geodf_projected, faulty_gdf):
 
 
 
-#####
-# Add Interpolation if necessary   
-#####
-
-
-
-
-
 
 def main():
     data_dir = Path("data")
@@ -257,24 +368,26 @@ def main():
     print("assigning data to dataframe and correcting sonar-GPS times")
     snr_dataframe = assign_data_to_dataframe(data_dir, snr_dataframe_empty, snr_header)
     print("starting get_gps")
-    gps_dataframe = get_gps_dataframe(data_dir)
-    print("merging GPS and snr data")
-    merged_dataframe = merge_snr_gps(snr_dataframe, gps_dataframe)
-    print("converting to geodataframe and projecting to UTM 33N")
-    geodataframe_snr = convert_to_utm_geodf(merged_dataframe)
+    gps_geodf_projected = get_gps_dataframe(data_dir) #including interpolation
+    print("creating interpolated points")
+    interpolated_snr = create_interpolated_coords(snr_dataframe, gps_geodf_projected)
+    # print("merging GPS and snr data")
+    # merged_dataframe = merge_snr_gps(snr_dataframe, gps_geodf_projected)
+    # print("converting to geodataframe and projecting to UTM 33N")
+    # geodataframe_snr = convert_to_utm_geodf(merged_dataframe)
     print("detecting and removing faulty depths")
-    filtered_data, faulty_data = detect_and_remove_faulty_depths(geodataframe_snr)
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(interpolated_snr)
     print("reducing data")
     selected_snr_data, selected_faulty_snr_data = reduce_data(filtered_data, faulty_data)
     print("saving output")
     output_path = Path("output")
-    selected_snr_data.to_csv(output_path / "snr_selected_filtered_new.csv", index=False)
-    filtered_data.to_csv(output_path / "snr_collection_filtered_new.csv", index=False)
-    faulty_data.to_csv(output_path / "snr_errors_collection.csv", index=False)
-    selected_faulty_snr_data.to_csv(output_path / "snr_errors_selected.csv", index=False)
+    selected_snr_data.to_csv(output_path / "snr_int_selected_filtered_new.csv", index=False)
+    filtered_data.to_csv(output_path / "snr_int_collection_filtered_new.csv", index=False)
+    faulty_data.to_csv(output_path / "snr_int_errors_collection.csv", index=False)
+    selected_faulty_snr_data.to_csv(output_path / "snr_int_errors_selected.csv", index=False)
     # output data as shp-file
-    selected_snr_data.to_file(output_path / "snr.shp", driver='ESRI Shapefile')
-    selected_faulty_snr_data.to_file(output_path / "snr_error.shp", driver='ESRI Shapefile')
+    selected_snr_data.to_file(output_path / "snr_int.shp", driver='ESRI Shapefile')
+    selected_faulty_snr_data.to_file(output_path / "snr_int_error.shp", driver='ESRI Shapefile')
 
     input("we're all done!")
     
