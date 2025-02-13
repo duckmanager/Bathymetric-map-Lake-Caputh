@@ -297,6 +297,44 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_si
 
 
 
+# adding correction for different lake levels
+
+""" Select by Date,
+    
+    substitute or add specific number from depth values in each date
+
+"""
+
+def generate_boundary_points(geodf_projected:gpd.GeoDataFrame ,data_dir):
+    spacing = 10 # Distance between points in crs-units (crs:25833 - meters)
+    
+    lake_boundary =gpd.read_file(data_dir/"shp_files"/"cap_see.shp")
+    lake_boundary = lake_boundary.to_crs("EPSG:25833")
+
+    # extract boundary as linegeometry
+    boundary = lake_boundary.exterior.unary_union
+
+    # create points in a set spacing
+    distances = np.arange(0, boundary.length, spacing) # list of point spacings
+    points = [boundary.interpolate(dist) for dist in distances]
+
+    """# Prüfen, ob der letzte Punkt mit dem ersten übereinstimmt (geschlossene Form)
+if boundary.is_ring and not points[-1].equals(points[0]):
+    points.append(points[0])  # Letzten Punkt exakt auf den Startpunkt setzen"""
+
+    df_points = pd.DataFrame([(p.x, p.y) for p in points], columns=["Interpolated_Long", "Interpolated_Lat"])
+    df_points['Depth (m)']= 0
+    df_points['file_id'] = "artificial_boundary_points"
+
+
+    df_combined = pd.concat([geodf_projected, df_points], ignore_index=True)
+
+    return df_combined
+
+
+
+
+
 
 
 
@@ -337,6 +375,8 @@ def main():
     adjusted_gdf = adjust_depths(av_vel)
     print("detecting and removing faulty depths")
     filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf)
+    print("creating lake outlines")
+    gdf_complete = generate_boundary_points(filtered_data, data_dir)
     #-print("reducing data")
     #-selected_vel_data, selected_faulty_vel_data = reduce_data(filtered_data, faulty_data)
     print("saving output")
@@ -345,7 +385,7 @@ def main():
     #-filtered_data.to_csv(output_path / "vel_int_collection_filtered_cleandup.csv", index=False)
     #-faulty_data.to_csv(output_path / "vel_int_errors_collection.csv", index=False)
     #-selected_faulty_vel_data.to_csv(output_path / "vel_int_errors_selected.csv", index=False)
-    filtered_data.to_csv(output_path / "depth_and_average_vel_int_filtered.csv", index=False)
+    gdf_complete.to_csv(output_path / "depth_and_average_vel_int_filtered_outline.csv", index=False)
     faulty_data.to_csv(output_path / "error_depth_and_average_vel_int_filtered.csv", index=False)
 
     # output data as shp-file
