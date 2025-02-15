@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 import geopandas as gpd
-import shapely
+import shapely.geometry
 import numpy as np
 from pymatreader import read_mat
 from datetime import datetime, timedelta
@@ -236,10 +236,10 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
     # Definiere die Beam-Typen und ihre entsprechenden Azimuth-Korrekturen (vorab in Radian umgewandelt)
     beams = [
         {"type": "VB", "depth_col": "VB Depth (m)", "angle": np.radians(0)},
-        {"type": "Beam1", "depth_col": "BT Beam4 Depth (m)", "angle": np.radians(45)},
-        {"type": "Beam2", "depth_col": "BT Beam3 Depth (m)", "angle": np.radians(135)},
-        {"type": "Beam3", "depth_col": "BT Beam2 Depth (m)", "angle": np.radians(225)},
-        {"type": "Beam4", "depth_col": "BT Beam1 Depth (m)", "angle": np.radians(315)}
+        {"type": "Beam1", "depth_col": "BT Beam4 Depth (m)", "angle": np.radians(45)}, 
+        {"type": "Beam2", "depth_col": "BT Beam3 Depth (m)", "angle": np.radians(135)}, 
+        {"type": "Beam3", "depth_col": "BT Beam2 Depth (m)", "angle": np.radians(225)}, 
+        {"type": "Beam4", "depth_col": "BT Beam1 Depth (m)", "angle": np.radians(315)} 
     ]
     
     # Leere Liste für das neue DataFrame
@@ -271,12 +271,13 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
                     "Beam_type": beam_type,
                     "Depth (m)": depth,
                     "Longitude": new_x,
-                    "Latitude": new_y
+                    "Latitude": new_y,
+                    "geometry": shapely.geometry.Point(new_x, new_y)
                 })
     
     # Neues DataFrame aus den gesammelten Daten erstellen
-    transformed_df = pd.DataFrame(transformed_data)
-    return transformed_df
+    transformed_gdf = gpd.GeoDataFrame(transformed_data,geometry= "geometry", crs="EPSG:25833")
+    return transformed_gdf
 
 
 
@@ -344,14 +345,14 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_si
                 faulty_entries.append(entry)
                 faulty_indices.append(indices[i])
 
-    # delecte faulty points
+    # delete faulty points
     geodf_projected.drop(faulty_indices, inplace=True)
 
     # ceate dataframe from faulty points
     faulty_df =pd.DataFrame(faulty_entries)
 
     # create geodataframe from dataframe to be able to output shp-file later - not fully working
-    faulty_gdf = gpd.GeoDataFrame(faulty_df, geometry=gpd.points_from_xy(faulty_df['Interpolated_Long'], faulty_df['Interpolated_Lat']), crs="EPSG:25833")
+    faulty_gdf = gpd.GeoDataFrame(faulty_df, geometry=gpd.points_from_xy(faulty_df['Longitude'], faulty_df['Latitude']), crs="EPSG:25833")
 
     return geodf_projected, faulty_gdf
 
@@ -368,11 +369,11 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_si
 def generate_boundary_points(geodf_projected:gpd.GeoDataFrame ,data_dir):
     spacing = 2 # Distance between points in crs-units (crs:25833 - meters)
     
-    lake_boundary =gpd.read_file(data_dir/"shp_files"/"cap_see.shp")
+    lake_boundary =gpd.read_file(data_dir/"shp_files_copy"/"cap_see.shp")
     lake_boundary = lake_boundary.to_crs("EPSG:25833")
 
     # extract boundary as linegeometry
-    boundary = lake_boundary.exterior.unary_union
+    boundary = lake_boundary.exterior.union_all()
 
     # create points in a set spacing
     distances = np.arange(0, boundary.length, spacing) # list of point spacings
@@ -382,14 +383,16 @@ def generate_boundary_points(geodf_projected:gpd.GeoDataFrame ,data_dir):
 if boundary.is_ring and not points[-1].equals(points[0]):
     points.append(points[0])  # Letzten Punkt exakt auf den Startpunkt setzen"""
 
-    df_points = pd.DataFrame([(p.x, p.y) for p in points], columns=["Interpolated_Long", "Interpolated_Lat"])
+    df_points = pd.DataFrame([(p.x, p.y) for p in points], columns=["Longitude", "Latitude"])
     df_points['Depth (m)']= 0
     df_points['file_id'] = "artificial_boundary_points"
+    df_points = gpd.GeoDataFrame(df_points, geometry=gpd.points_from_xy(df_points["Longitude"], df_points["Latitude"]), crs="EPSG:25833")
 
 
-    df_combined = pd.concat([geodf_projected, df_points], ignore_index=True)
 
-    return df_combined
+    gdf_combined = gpd.GeoDataFrame(pd.concat([geodf_projected, df_points], ignore_index=True))
+
+    return gdf_combined
 
 
 
@@ -426,24 +429,24 @@ def main():
     interpolated_sum = create_interpolated_coords(sum_dataframe, gps_geodf_projected)
 
     print("create multibeam points")
-    multipoint_df = create_multibeam_points(interpolated_sum)
+    multipoint_gdf = create_multibeam_points(interpolated_sum)
     # print("merging GPS and sum data")
     # merged_dataframe = merge_sum_gps(sum_dataframe, gps_geodf_projected)
     # print("converting to geodataframe and projecting to UTM 33N")
     # geodataframe_sum = convert_to_utm_geodf(merged_dataframe)
     print("adjusting depths")
-    #--adjusted_gdf = adjust_depths(interpolated_sum)
+    adjusted_gdf = adjust_depths(multipoint_gdf)
     print("detecting and removing faulty depths")
-    #--filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf)
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf)
     print("creating lake outlines")
-    #--gdf_complete = generate_boundary_points(filtered_data, data_dir)
+    gdf_complete = generate_boundary_points(filtered_data, data_dir)
     #-print("reducing data")
     #-selected_sum_data, selected_faulty_sum_data = reduce_data(filtered_data, faulty_data)
     print("saving output")
     output_path = Path("output/multibeam")
-    multipoint_df.to_csv(output_path / "sum_multibeam.csv", index=False)
+    gdf_complete.to_csv(output_path / "BT_sum_multibeam_filtered_boundary2.csv", index=False)
     #-filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
-    #-faulty_data.to_csv(output_path / "sum_int_errors_collection.csv", index=False)
+    faulty_data.to_csv(output_path / "BT_sum_multibeam_error.csv", index=False)
     #-selected_faulty_sum_data.to_csv(output_path / "sum_int_errors_selected.csv", index=False)
     #--gdf_complete.to_csv(output_path / "depth_and_average_sum_int_filtered_outline.csv", index=False)
     #--faulty_data.to_csv(output_path / "error_depth_and_average_sum_int_filtered.csv", index=False)

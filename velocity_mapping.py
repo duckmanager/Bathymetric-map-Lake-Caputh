@@ -306,13 +306,13 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_si
 """
 
 def generate_boundary_points(geodf_projected:gpd.GeoDataFrame ,data_dir):
-    spacing = 10 # Distance between points in crs-units (crs:25833 - meters)
+    spacing = 2 # Distance between points in crs-units (crs:25833 - meters)
     
     lake_boundary =gpd.read_file(data_dir/"shp_files"/"cap_see.shp")
     lake_boundary = lake_boundary.to_crs("EPSG:25833")
 
     # extract boundary as linegeometry
-    boundary = lake_boundary.exterior.unary_union
+    boundary = lake_boundary.exterior.union_all()
 
     # create points in a set spacing
     distances = np.arange(0, boundary.length, spacing) # list of point spacings
@@ -327,9 +327,8 @@ if boundary.is_ring and not points[-1].equals(points[0]):
     df_points['file_id'] = "artificial_boundary_points"
 
 
-    df_combined = pd.concat([geodf_projected, df_points], ignore_index=True)
-
-    return df_combined
+    gdf_combined = gpd.GeoDataFrame(pd.concat([geodf_projected, df_points], ignore_index=True))
+    return gdf_combined
 
 
 
