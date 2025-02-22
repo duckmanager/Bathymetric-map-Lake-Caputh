@@ -41,28 +41,28 @@ def calculate_depth_differences(transformed_gdf):
     Optimiert mit cKDTree für schnellere Nachbarschaftssuche.
     Gibt zusätzlich ein GeoDataFrame mit den verwendeten Punkten zurück.
     """
-    # Sicherstellen, dass es ein GeoDataFrame ist
+    # check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
-    # Maximale Distanz für nahe Punkte
-    max_distance = 0.5  # Meter
-    min_time_diff = pd.Timedelta(minutes=5)  # Zeitdifferenz von mehr als 5 Minuten
+    # max dist between points
+    max_distance = 0.5  # meters
+    min_time_diff = pd.Timedelta(minutes=5)  # min timedifference between points
     
-    # Konvertiere Zeitspalten im Voraus
+    # convert time column
     transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
     transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date
     unique_dates = sorted(transformed_gdf['Date'].unique())
     
-    # Berücksichtige auch Vergleiche innerhalb desselben Tages
+    # setup date comparisons - also accepting same day crossings
     date_combinations = set(tuple(sorted((d1, d2))) for d1, d2 in combinations(unique_dates, 2))
     date_combinations.update((d, d) for d in unique_dates)
     
-    # Initialisiere ein defaultdict für schnellere Zugriffe
+    # Initialising dicts
     depth_diff_dict = defaultdict(list)
     used_indices = set()
     
-    # Extrahiere relevante Daten als NumPy-Arrays für schnelleren Zugriff
+    # Extract necessary data into numpy array for fast access
     coords = np.vstack([transformed_gdf.geometry.x, transformed_gdf.geometry.y]).T
     depths = transformed_gdf['Depth (m)'].values
     datetimes = transformed_gdf['DateTime'].values # could be changed to use UTC
@@ -87,23 +87,23 @@ def calculate_depth_differences(transformed_gdf):
         # calculate the time differences
         time_diffs = np.abs(neighbor_times - point_time)
         
-        # Finde alle Nachbarn mit ausreichend großer Zeitdifferenz
+        # find neighbors with time difference
         valid_neighbor_mask = time_diffs > min_time_diff
         valid_neighbors = np.array(neighbors)[valid_neighbor_mask]
         valid_dates = neighbor_dates[valid_neighbor_mask]
         valid_depths = neighbor_depths[valid_neighbor_mask]
         
-        # Speichere die gültigen Paare
+        # save valid neighbors
         for match_date, match_depth in zip(valid_dates, valid_depths):
             date_pair = tuple(sorted((point_date, match_date)))
             depth_diff_dict[date_pair].append(abs(point_depth - match_depth))
             used_indices.add(idx)
             used_indices.update(valid_neighbors)
     
-    # Erstelle ein DataFrame aus dem Dictionary, wobei jede Spalte nur so viele Einträge hat, wie berechnet wurden
+    # create dataframe with depth differences from dict with each column starting in the first line
     depth_diff_df = pd.DataFrame(dict([(f"{k[0]}-{k[1]}", pd.Series(v)) for k, v in depth_diff_dict.items()]))
     
-    # Erstelle ein GeoDataFrame mit nur den verwendeten Punkten
+    # Create a GeodataFrame with all used points for visual controle
     used_points_gdf = transformed_gdf.loc[list(used_indices)].copy()
     
     return depth_diff_df, used_points_gdf
@@ -163,8 +163,10 @@ def compute_statistics(depth_diff_df:pd.DataFrame):
         'StdDev': depth_diff_df.std()
     })
 
+    # create a boxplot with the statistics - maybe change to saveing to files later 
     box_plot = depth_diff_df.boxplot()
     plt.show()
+    # add tilte, maybe better date format, axis text
     return stats_df, box_plot
 
 
@@ -181,8 +183,7 @@ def main():
 
     print("calculating statics")
     stats_df, box_plot = compute_statistics(depth_difference)
-    input("saving data")
-    input("saving data")
+    print("saving data")
 
     data_output_dir = Path("output/multibeam/QC")
     used_points_gdf.to_csv(data_output_dir/"QC_used_points.csv", index=False)
