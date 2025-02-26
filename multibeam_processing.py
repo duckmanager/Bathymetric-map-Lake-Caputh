@@ -5,6 +5,8 @@ import shapely.geometry
 import numpy as np
 from pymatreader import read_mat
 from datetime import datetime, timedelta
+from scipy.spatial import cKDTree
+from collections import defaultdict
 from tqdm import tqdm
 
 
@@ -279,22 +281,6 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
     transformed_gdf = gpd.GeoDataFrame(transformed_data,geometry= "geometry", crs="EPSG:25833")
     return transformed_gdf
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def adjust_depths(com_gdf: gpd.GeoDataFrame):
 
     # turn depths into negative values
@@ -303,8 +289,10 @@ def adjust_depths(com_gdf: gpd.GeoDataFrame):
     return com_gdf
 
 
-# filter faulty points
-def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_size: int = 10, threshold: float = 0.5): # change according to needs and survey circumstances
+
+
+# filter faulty points #     old version
+def detect_and_remove_faulty_depth(geodf_projected: gpd.GeoDataFrame, window_size: int = 10, threshold: float = 0.5): # change according to needs and survey circumstances
     """
     Identify faulty sum points based on moving average of sorrounding points and difference to them. Change window size and threshold for different filter
 
@@ -358,7 +346,65 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_si
 
 
 
-# adding correction for different lake lesums
+# Adding different error detection approach
+# looking for neighbors in 5m? radius, taking average of them, without middle points. If middle point is more than ?0.5m? off this mean, it gets deleted and safed to faulty points.
+    # Sicherstellen, dass es ein GeoDataFrame ist
+def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_distance: int = 5, threshold: float = 0.6):
+    if not isinstance(geodf_projected, gpd.GeoDataFrame):
+        raise ValueError("transformed_gdf must be gdf!")
+    
+    # Extract relevant data as numpy array
+    coords = np.vstack([geodf_projected.geometry.x, geodf_projected.geometry.y]).T
+    depths = geodf_projected['Depth (m)'].values
+
+    
+    # create cKDTree for efficient neighbor search
+    tree = cKDTree(coords)
+    
+    # look on tree for neighbours in set distance - safe indices in list
+    indices = tree.query_ball_tree(tree, max_distance)
+
+    # Lists for filtered indices
+    valid_indices = []
+    removed_indices = []
+
+    for i, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Filtering points"):
+        if len(neighbors) > 1:  # It must be neighbors
+            neighbor_depths = [depths[j] for j in neighbors if j != i]  # dont use middlepoint
+            if neighbor_depths:  # be sure they are not empty
+                mean_depth = np.mean(neighbor_depths)  # calculate mean
+                if abs(depths[i] - mean_depth) > threshold:  # check against threshold
+                    removed_indices.append(i)
+                else:
+                    valid_indices.append(i)
+        else:
+            valid_indices.append(i)
+
+    # check for borderpoints marked as faulty - should be only used as reference, not filtering them
+    boundary_indices = [i for i in removed_indices if geodf_projected.iloc[i]['file_id'] == 'artificial_boundary_points']
+    removed_indices = [i for i in removed_indices if i not in boundary_indices]
+    valid_indices.extend(boundary_indices)
+
+    # Create new gdf with filtered and faulty points
+    filtered_gdf = geodf_projected.iloc[valid_indices].copy()
+    removed_gdf = geodf_projected.iloc[removed_indices].copy()
+
+    return filtered_gdf, removed_gdf
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# adding correction for different lake levels
 
 """ Select by Date,
     
@@ -366,36 +412,125 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, window_si
 
 """
 
-def generate_boundary_points(geodf_projected:gpd.GeoDataFrame ,data_dir):
-    spacing = 2 # Distance between points in crs-units (crs:25833 - meters)
+def generate_boundary_points(data_dir):
+    spacing = 1  # distamnce between artifical edge points in m (CRS EPSG:25833)
     
-    lake_boundary =gpd.read_file(data_dir/"shp_files_copy"/"cap_see.shp")
-    lake_boundary = lake_boundary.to_crs("EPSG:25833")
+    # load lake edge and transform to line-geometry
+    lake_boundary = gpd.read_file(data_dir / "shp_files" / "caplake_outline_final.shp").to_crs("EPSG:25833")
+    boundary = lake_boundary.unary_union.exterior
+    
+    # load measured points and transform into gdf
+    edge_points = pd.read_csv(data_dir / "outline" / "Capsee_outlinepoints_final.csv")
+    edge_gdf = gpd.GeoDataFrame( edge_points, geometry=gpd.points_from_xy(edge_points.E, edge_points.N), crs="EPSG:25833")
+    
+    # check for uniform dates
+    unique_dates = edge_gdf["Date"].unique()
+    if len(unique_dates) == 1:
+        common_date = unique_dates[0]  # save the date
+    else:
+        print("Error: All edge point measuremtns must be from the same date to allow for later correction of water level fluctuations. Please fix manually")
+        print("Found dates:", unique_dates)
 
-    # extract boundary as linegeometry
-    boundary = lake_boundary.exterior.union_all()
+    # create artifical edge points with equal distances
+    distances = np.arange(0, boundary.length, spacing)
+    boundary_points = [boundary.interpolate(d) for d in distances]
+    boundary_gdf = gpd.GeoDataFrame(geometry=boundary_points, crs="EPSG:25833")
+    boundary_gdf["depth"] = np.nan # depth column for better differentiation of interpolation
 
-    # create points in a set spacing
-    distances = np.arange(0, boundary.length, spacing) # list of point spacings
-    points = [boundary.interpolate(dist) for dist in distances]
+    # Assigning nearest neighbor points and find nearest edge point to measurments
+    # transforming into an array for faster access
+    boundary_coords = np.column_stack((boundary_gdf.geometry.x, boundary_gdf.geometry.y))
+    edge_coords = np.column_stack((edge_gdf.geometry.x, edge_gdf.geometry.y))
+    # find nearest neighbors of each edge point to assign measured depth to nearest edge point
+    boundary_tree = cKDTree(boundary_coords)
+    _, edge_gdf["nearest_boundary_idx"] = boundary_tree.query(edge_coords)
+    
+    # assigning measured depths to nearest artifical edge points
+    boundary_gdf.loc[edge_gdf["nearest_boundary_idx"], "depth"] = edge_gdf["Depth (m)"].values
 
-    """# Prüfen, ob der letzte Punkt mit dem ersten übereinstimmt (geschlossene Form)
-if boundary.is_ring and not points[-1].equals(points[0]):
-    points.append(points[0])  # Letzten Punkt exakt auf den Startpunkt setzen"""
+    # sort edge points along the edge
+    edge_gdf = edge_gdf.sort_values("nearest_boundary_idx").reset_index(drop=True)
+    edge_gdf["next_point"] = edge_gdf["geometry"].shift(-1)
+    edge_gdf["next_depth"] = edge_gdf["Depth (m)"].shift(-1)
+    edge_gdf["distance_to_next"] = edge_gdf.geometry.distance(edge_gdf["next_point"])
 
-    df_points = pd.DataFrame([(p.x, p.y) for p in points], columns=["Longitude", "Latitude"])
-    df_points['Depth (m)']= 0
-    df_points['file_id'] = "artificial_boundary_points"
-    df_points = gpd.GeoDataFrame(df_points, geometry=gpd.points_from_xy(df_points["Longitude"], df_points["Latitude"]), crs="EPSG:25833")
+    # Interpolation between measurment points if <150 m distance
+    for _, row in edge_gdf.iterrows():
+        if pd.notna(row["next_depth"]) and row["distance_to_next"] < 150:
+            idx1 = row["nearest_boundary_idx"]
+            idx2 = boundary_tree.query([row["next_point"].x, row["next_point"].y])[1]
+            idx_start, idx_end = min(idx1, idx2), max(idx1, idx2)
+            range_idx = range(idx_start, idx_end + 1)
+            depth_diff = row["next_depth"] - row["Depth (m)"]
+            num_points = len(range_idx)
+            depth_step = depth_diff / (num_points - 1) if num_points > 1 else 0
+            for i, idx in enumerate(range_idx):
+                boundary_gdf.at[idx, "depth"] = row["Depth (m)"] + i * depth_step
+
+    # Extrapolate same depth as measured for 15m if no measurment point is within 150m
+    """    for _, row in edge_gdf.iterrows():
+        if pd.isna(row["next_depth"]) or row["distance_to_next"] >= 150:
+            start_idx = row["nearest_boundary_idx"]
+            for i in range(1, int(15 / spacing) + 1):
+                if start_idx + i < len(boundary_gdf): #not necessary?
+                    boundary_gdf.at[start_idx + i, "depth"] = row["Depth (m)"]"""
+
+
+    # Berechne den Abstand zum vorherigen Messpunkt (cyclic)
+    edge_gdf["prev_point"] = edge_gdf["geometry"].shift(1)
+    edge_gdf["prev_depth"] = edge_gdf["Depth (m)"].shift(1)
+    edge_gdf["distance_to_prev"] = edge_gdf.geometry.distance(edge_gdf["prev_point"])
+
+    # Extrapolation entlang der Seeumrisslinie (zyklisch) in beide Richtungen
+    extrapolation_distance = 15  # in Meter
+    num_extrap_points = int(extrapolation_distance / spacing)
+
+    for _, row in edge_gdf.iterrows():
+        if pd.isna(row["nearest_boundary_idx"]):
+            continue
+        idx = int(row["nearest_boundary_idx"])
+        depth_value = row["Depth (m)"]
+        
+        # Extrapolation in Vorwärtsrichtung:
+        # Bedingung: kein nächster Messpunkt vorhanden oder Abstand >=150 m
+        if pd.isna(row["next_depth"]) or row["distance_to_next"] >= 150:
+            for i in range(1, num_extrap_points + 1):
+                forward_idx = (idx + i) % len(boundary_gdf)
+                # Fülle nur, wenn noch kein Wert gesetzt wurde
+                if pd.isna(boundary_gdf.at[forward_idx, "depth"]):
+                    boundary_gdf.at[forward_idx, "depth"] = depth_value
+                else:
+                    break  # Stoppe, wenn bereits ein Wert existiert
+                    
+        # Extrapolation in Rückwärtsrichtung:
+        # Bedingung: kein vorheriger Messpunkt vorhanden oder Abstand >=150 m
+        if pd.isna(row["prev_depth"]) or row["distance_to_prev"] >= 150:
+            for i in range(1, num_extrap_points + 1):
+                backward_idx = (idx - i) % len(boundary_gdf)
+                if pd.isna(boundary_gdf.at[backward_idx, "depth"]):
+                    boundary_gdf.at[backward_idx, "depth"] = depth_value
+                else:
+                    break
+
+    # Delete all artifical edge points without assigned depth
+    boundary_gdf = boundary_gdf.dropna(subset=["depth"]).copy()
+    
+    # safe to universal columns for merging with sonar measurments
+    boundary_gdf["Longitude"] = boundary_gdf.geometry.x
+    boundary_gdf["Latitude"] = boundary_gdf.geometry.y
+    boundary_gdf["Depth (m)"] = boundary_gdf["depth"]
+    boundary_gdf.drop(columns=["depth"], inplace=True)
+    boundary_gdf['file_id'] = "artificial_boundary_points"
+    boundary_gdf["Date"] = common_date # if fails, the measumrent points used different dates
+
+    return boundary_gdf
 
 
 
-    gdf_combined = gpd.GeoDataFrame(pd.concat([geodf_projected, df_points], ignore_index=True))
+def combine_multibeam_edge(geodf_projected, boundary_gdf):
+    gdf_combined = gpd.GeoDataFrame(pd.concat([geodf_projected, boundary_gdf], ignore_index=True))
 
     return gdf_combined
-
-
-
 
 
 
@@ -434,28 +569,37 @@ def main():
     # merged_dataframe = merge_sum_gps(sum_dataframe, gps_geodf_projected)
     # print("converting to geodataframe and projecting to UTM 33N")
     # geodataframe_sum = convert_to_utm_geodf(merged_dataframe)
-    print("adjusting depths")
-    adjusted_gdf = adjust_depths(multipoint_gdf)
-    print("detecting and removing faulty depths")
-    filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf)
     print("creating lake outlines")
-    gdf_complete = generate_boundary_points(filtered_data, data_dir)
+    boundary_gdf = generate_boundary_points(data_dir)
+    
+    print("merging boundary points and measurment points")
+    gdf_combined = combine_multibeam_edge(multipoint_gdf, boundary_gdf)
+    
+    print("adjusting depths")
+    adjusted_gdf = adjust_depths(gdf_combined)
+    
+    print("detecting and removing faulty depths")
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf) # Reihenfolge umgekehrt
     #-print("reducing data")
     #-selected_sum_data, selected_faulty_sum_data = reduce_data(filtered_data, faulty_data)
     print("saving output")
     output_path = Path("output/multibeam")
-    gdf_complete.to_csv(output_path / "BT_sum_multibeam_filtered_boundary2.csv", index=False)
+    filtered_data.to_csv(output_path / "m_filtered_newedge.csv", index=False)
+    faulty_data.to_csv(output_path / "m_error_newedge.csv", index=False)
     #-filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
-    faulty_data.to_csv(output_path / "BT_sum_multibeam_error.csv", index=False)
+    #-  faulty_data.to_csv(output_path / "sum_multibeam_error.csv", index=False)
     #-selected_faulty_sum_data.to_csv(output_path / "sum_int_errors_selected.csv", index=False)
     #--gdf_complete.to_csv(output_path / "depth_and_average_sum_int_filtered_outline.csv", index=False)
     #--faulty_data.to_csv(output_path / "error_depth_and_average_sum_int_filtered.csv", index=False)
+    # adjusted_gdf.to_csv(output_path / "multibeam_nozeros.csv", index=False)
 
     # output data as shp-file
     # filtered_data.to_file(output_path / "sum_int.shp", driver='ESRI Shapefile')
     # selected_faulty_sum_data.to_file(output_path / "sum_int_error.shp", driver='ESRI Shapefile')
+    
 
     input("we're all done!")
+    return
     
 
 main()

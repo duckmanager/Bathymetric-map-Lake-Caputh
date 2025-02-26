@@ -82,9 +82,10 @@ def generate_boundary_points(data_dir):
     boundary_gdf["Longitude"] = boundary_gdf.geometry.x
     boundary_gdf["Latitude"] = boundary_gdf.geometry.y
     boundary_gdf["Depth (m)"] = boundary_gdf["depth"]
+    boundary_gdf.drop(columns=["depth"], inplace=True)
     boundary_gdf["Date"] = common_date # if fails, the measumrent points used different dates
 
-    return boundary_gdf[["Longitude", "Latitude", "Depth (m)"]]
+    return boundary_gdf
 
 
 
@@ -102,7 +103,7 @@ def main():
 main()
 
 # old version
-def generate_boundary_points(geodf_projected:gpd.GeoDataFrame ,data_dir):
+def generate_boundary_points_old(geodf_projected:gpd.GeoDataFrame ,data_dir):
     spacing = 2 # Distance between points in crs-units (crs:25833 - meters)
     
     lake_boundary =gpd.read_file(data_dir/"shp_files"/"cap_see.shp")
