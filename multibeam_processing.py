@@ -34,41 +34,9 @@ def create_dataframe(data_dir: Path):
     return(sum_dataframe, sum_header)
 
 
-# function to correct utc timeline of sonar-GPS
-####### maybe change later to keeping the .sec
 
 
-def correct_utc(utc_list):
-    # find first utc ---------------- no need to check if isinstance?
-    first_valid_utc = next((utc for utc in utc_list if isinstance(utc, (int, float))), None)
-
-    if first_valid_utc is None:
-        print("Invalid UTC list!")
-        return utc_list
-
-    # seperate first utc sample into hour, minute, second, decisecond
-    utc_str = f"{first_valid_utc:08.1f}"  # Format: HHMMSS.x
-    base_time_str = utc_str[:6]  # HHMMSS
-    decimal_part = utc_str[7]    # decimal place
-
-    # convert base time into datetime object
-    try:
-        start_time = datetime.strptime(base_time_str, "%H%M%S")
-    except ValueError as e:
-        print(f"Error parsing time: {e}")
-        return utc_list
-
-    # create corrected timeline, beginning at base_time
-    corrected_utc_pre = [start_time + timedelta(seconds=i) for i in range(len(utc_list))]
-
-    # add decimal part back onto the corrected timestamps
-    corrected_utc = [t.strftime("%H%M%S") + f".{decimal_part}" for t in corrected_utc_pre]
-
-    return corrected_utc
-
-
-
-# Assign sum and UTC data to dataframe
+# Assign sum-depth and UTC data to dataframe
 def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_header: list):
     data_list = []
 
@@ -104,6 +72,38 @@ def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_he
     sum_dataframe = pd.DataFrame(data_list, columns=sum_dataframe.columns)
 
     return sum_dataframe
+
+# function to correct utc timeline of sonar-GPS - applied in "assign_data_to_dataframe"
+def correct_utc(utc_list):
+    # find first utc ---------------- no need to check if isinstance?
+    first_valid_utc = next((utc for utc in utc_list if isinstance(utc, (int, float))), None)
+
+    if first_valid_utc is None:
+        print("Invalid UTC list!")
+        return utc_list
+
+    # seperate first utc sample into hour, minute, second, decisecond
+    utc_str = f"{first_valid_utc:08.1f}"  # Format: HHMMSS.x
+    base_time_str = utc_str[:6]  # HHMMSS
+    decimal_part = utc_str[7]    # decimal place
+
+    # convert base time into datetime object
+    try:
+        start_time = datetime.strptime(base_time_str, "%H%M%S")
+    except ValueError as e:
+        print(f"Error parsing time: {e}")
+        return utc_list
+
+    # create corrected timeline, beginning at base_time
+    corrected_utc_pre = [start_time + timedelta(seconds=i) for i in range(len(utc_list))]
+
+    # add decimal part back onto the corrected timestamps
+    corrected_utc = [t.strftime("%H%M%S") + f".{decimal_part}" for t in corrected_utc_pre]
+
+    return corrected_utc
+
+
+
 
 
 # load external GPS data and transform to UTM33N
@@ -142,7 +142,6 @@ def get_gps_dataframe(data_dir: Path):
     # turn into dataframe
     gps_df = pd.DataFrame(gps_data_list)
 
-
     # turn into geodataframe to project to UTM33N
     gps_geodf = gpd.GeoDataFrame(gps_df,
         crs='EPSG:4326',
@@ -177,12 +176,12 @@ def create_interpolated_coords(sum_df, gps_gdf):
     # Iterate through gps file to safe same dates in one nested dict, to iterate more easy later
     gps_dict = {date: df.reset_index(drop=True) for date, df in gps_gdf.groupby('date')}
 
-    # Iteration über die sum-Daten
+    # Iterate over sum-data
     for idx, row in tqdm(sum_df.iterrows(), total=sum_df.shape[0]):
         date = row['date']
         utc_full = row['Utc']  # Format HHMMSS.s
 
-        # Zeit in ganzzahligen und Dezimalteil aufteilen
+        # seperate time in full seconds and decimal part
         try:
             utc_str, decimal_str = utc_full.split('.')
             decimal_part = int(decimal_str)
@@ -190,34 +189,34 @@ def create_interpolated_coords(sum_df, gps_gdf):
             interpolated_coords.append((None, None))
             continue
 
-        # Zugriff auf die GPS-Daten für dasselbe Datum
+        # access gps data for same date
         gps_day = gps_dict.get(date)
         if gps_day is None:
             interpolated_coords.append((None, None))
             continue
 
-        # Index des exakten UTC-Zeitpunkts im GPS-DataFrame finden
+        # Find index of same UTC in gps-data
         gps_index = gps_day[gps_day['utc'] == utc_str].index
 
         if not gps_index.empty:
-            idx = gps_index[0]  # Index des exakten Zeitpunkts
+            idx = gps_index[0]  # Index of exact time 
 
-            # Prüfen, ob ein nachfolgender Punkt existiert
+            # check for following point
             if idx + 1 < len(gps_day):
                 before_point = gps_day.iloc[idx]
                 after_point = gps_day.iloc[idx + 1]
 
-                # Interpolation der Koordinaten
+                # Interpolation of coordinates
                 interp_factor = decimal_part / 10.0
                 x_interp = before_point.geometry.x + interp_factor * (after_point.geometry.x - before_point.geometry.x)
                 y_interp = before_point.geometry.y + interp_factor * (after_point.geometry.y - before_point.geometry.y)
 
                 interpolated_coords.append((x_interp, y_interp))
             else:
-                # Kein nachfolgender Punkt vorhanden
+                # if no following point exists
                 interpolated_coords.append((None, None))
         else:
-            # Kein exakter GPS-Zeitstempel gefunden
+            # empty if no fitting gps point is found
             interpolated_coords.append((None, None))
 
     # Add interpoalted coords to dataframe
@@ -229,13 +228,13 @@ def create_interpolated_coords(sum_df, gps_gdf):
 
 def create_multibeam_points(sum_df: gpd.GeoDataFrame):
 
-    # Konvertiere Boat Direction (deg) in numerische Werte (Fehlerhafte Werte werden NaN)
+    # convert boat direction (deg) to numeric values
     sum_df['Boat Direction (deg)'] = pd.to_numeric(sum_df['Boat Direction (deg)'], errors='coerce')
 
-    # Konvertiere Azimuth (Boat Direction) in Radian
+    # convert Boat direction in Azimuth to radians - (why was that exactly neessary?)
     sum_df['Boat Direction (rad)'] = np.radians(sum_df['Boat Direction (deg)'])
     
-    # Definiere die Beam-Typen und ihre entsprechenden Azimuth-Korrekturen (vorab in Radian umgewandelt)
+    # Define beam types and ceam correction angles - (insert source for beam angles)
     beams = [
         {"type": "VB", "depth_col": "VB Depth (m)", "angle": np.radians(0)},
         {"type": "Beam1", "depth_col": "BT Beam4 Depth (m)", "angle": np.radians(45)}, 
@@ -244,10 +243,10 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
         {"type": "Beam4", "depth_col": "BT Beam1 Depth (m)", "angle": np.radians(315)} 
     ]
     
-    # Leere Liste für das neue DataFrame
+    # empty list for new dataframe
     transformed_data = []
     
-    # Iteriere über das DataFrame
+    # Iterate over former depth
     for _, row in tqdm(sum_df.iterrows(), total=sum_df.shape[0], desc="Transforming sonar data"):
         base_x, base_y = row['Interpolated_Long'], row['Interpolated_Lat']
         boat_dir = row['Boat Direction (rad)']
@@ -257,13 +256,13 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
             beam_type = beam["type"]
             depth = row[beam['depth_col']]
             
-            if pd.notna(depth):  # Nur wenn eine gültige Tiefe vorhanden ist
+            if pd.notna(depth):  # only if valid depth exists
                 if beam_type == "VB":
-                    new_x, new_y = base_x, base_y  # Vertical Beam bleibt an Originalposition
-                else:
-                    distance = np.tan(np.radians(25)) * float(depth)  # Berechne den seitlichen Abstand
-                    azimuth_corrected = boat_dir + beam['angle']
-                    new_x = base_x + distance * np.sin(azimuth_corrected)
+                    new_x, new_y = base_x, base_y  # Vertical Beam (VB) stays at original position
+                else: # calculate position of new beams
+                    distance = np.tan(np.radians(25)) * float(depth)  # calculate distance to VB
+                    azimuth_corrected = boat_dir + beam['angle'] # absolute angle to VB
+                    new_x = base_x + distance * np.sin(azimuth_corrected) # new beam positions
                     new_y = base_y + distance * np.cos(azimuth_corrected)
                 
                 transformed_data.append({
@@ -277,17 +276,9 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
                     "geometry": shapely.geometry.Point(new_x, new_y)
                 })
     
-    # Neues DataFrame aus den gesammelten Daten erstellen
+    # create new dataframe form collected data
     transformed_gdf = gpd.GeoDataFrame(transformed_data,geometry= "geometry", crs="EPSG:25833")
     return transformed_gdf
-
-def adjust_depths(com_gdf: gpd.GeoDataFrame):
-
-    # turn depths into negative values
-    com_gdf['Depth (m)'] = pd.to_numeric(com_gdf["Depth (m)"], errors= 'coerce').abs() * (-1)
-
-    return com_gdf
-
 
 
 
@@ -390,13 +381,6 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_dista
     removed_gdf = geodf_projected.iloc[removed_indices].copy()
 
     return filtered_gdf, removed_gdf
-
-
-
-
-
-
-
 
 
 
@@ -534,7 +518,13 @@ def combine_multibeam_edge(geodf_projected, boundary_gdf):
 
 
 
+# turn depths negativ - maybe add correction for water fluctuation later
+def adjust_depths(com_gdf: gpd.GeoDataFrame):
 
+    # turn depths into negative values
+    com_gdf['Depth (m)'] = pd.to_numeric(com_gdf["Depth (m)"], errors= 'coerce').abs() * (-1)
+
+    return com_gdf
 
 
 
@@ -584,6 +574,7 @@ def main():
     #-selected_sum_data, selected_faulty_sum_data = reduce_data(filtered_data, faulty_data)
     print("saving output")
     output_path = Path("output/multibeam")
+    filtered_data.to_csv(output_path / "filtered_data.csv", index=False)
     filtered_data.to_csv(output_path / "m_filtered_newedge.csv", index=False)
     faulty_data.to_csv(output_path / "m_error_newedge.csv", index=False)
     #-filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
