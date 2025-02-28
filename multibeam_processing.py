@@ -36,7 +36,6 @@ def create_dataframe(data_dir: Path):
 
 
 
-# Assign sum-depth and UTC data to dataframe
 def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_header: list):
     data_list = []
 
@@ -48,10 +47,19 @@ def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_he
         mat_file = data_dir / f"{file_id}.mat"
         if mat_file.exists():
             mat_data = read_mat(str(mat_file))
-            raw_utc = mat_data.get("GPS", {}).get("Utc", []) #extract .mat data
-            corrected_utc = correct_utc(raw_utc if isinstance(raw_utc, list) else raw_utc.flatten()) # get corrected timeline
+            raw_utc = mat_data.get("GPS", {}).get("Utc", [])
+            gps_quality = mat_data.get("GPS", {}).get("GPS_Quality", [])
+            
+            # Falls die Daten nicht als Liste vorliegen, in Array umwandeln
+            if not isinstance(raw_utc, list):
+                raw_utc = raw_utc.flatten()
+            if not isinstance(gps_quality, list):
+                gps_quality = gps_quality.flatten()
+                
+            corrected_utc = correct_utc(raw_utc, gps_quality)
         else:
-            print("Warrning: Mat-file -{file_id}.mat- ")  # Error if .mat-file not found
+            print(f"Warning: Mat-file -{file_id}.mat- not found")
+            corrected_utc = []
 
         with file.open("r") as f:
             lines = f.readlines()
@@ -59,49 +67,55 @@ def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_he
         # extract data
         for i, line in enumerate(lines[1:]):  # skip header
             values = line.strip().split(",")
-            row_dict = dict(zip(sum_header, values))  # assign values to columns
+            row_dict = dict(zip(sum_header, values))
             row_dict.update({
                 "file_id": file_id,
                 "Utc": corrected_utc[i] if i < len(corrected_utc) else None,
                 "Lat": None,
-                "Long": None # getting assigned later
-            })  
+                "Long": None  # wird später zugewiesen
+            })
             data_list.append(row_dict)
 
-    # put data in dataframe - is it a new dataframe?
+    # put data in dataframe
     sum_dataframe = pd.DataFrame(data_list, columns=sum_dataframe.columns)
+    sum_dataframe.to_csv("temp_newutclist.csv", index=False)
 
     return sum_dataframe
 
-# function to correct utc timeline of sonar-GPS - applied in "assign_data_to_dataframe"
-def correct_utc(utc_list):
-    # find first utc ---------------- no need to check if isinstance?
-    first_valid_utc = next((utc for utc in utc_list if isinstance(utc, (int, float))), None)
-
+def correct_utc(utc_list, gps_quality_list):
+    # Bestimme den ersten gültigen UTC-Wert (nicht 0)
+    first_valid_utc = next((utc for utc in utc_list if isinstance(utc, (int, float)) and utc != 0), None)
     if first_valid_utc is None:
         print("Invalid UTC list!")
         return utc_list
 
-    # seperate first utc sample into hour, minute, second, decisecond
+    # Zerlege den ersten gültigen UTC in Stunden, Minuten, Sekunden und Dezimalstelle
     utc_str = f"{first_valid_utc:08.1f}"  # Format: HHMMSS.x
     base_time_str = utc_str[:6]  # HHMMSS
-    decimal_part = utc_str[7]    # decimal place
+    decimal_part = utc_str[7]    # Dezimalstelle
 
-    # convert base time into datetime object
     try:
         start_time = datetime.strptime(base_time_str, "%H%M%S")
     except ValueError as e:
         print(f"Error parsing time: {e}")
         return utc_list
 
-    # create corrected timeline, beginning at base_time
-    corrected_utc_pre = [start_time + timedelta(seconds=i) for i in range(len(utc_list))]
+    # Erzeuge den optimalen Zeitverlauf (eine Liste von korrigierten Timestamps)
+    corrected_timestamps = [start_time + timedelta(seconds=i) for i in range(len(utc_list))]
+    corrected_utc_full = [t.strftime("%H%M%S") + f".{decimal_part}" for t in corrected_timestamps]
 
-    # add decimal part back onto the corrected timestamps
-    corrected_utc = [t.strftime("%H%M%S") + f".{decimal_part}" for t in corrected_utc_pre]
+    # Wandle Listen in NumPy-Arrays um, um vektorisierte Operationen zu ermöglichen
+    utc_array = np.array(utc_list, dtype=object)
+    gps_array = np.array(gps_quality_list, dtype=object)
 
-    return corrected_utc
+    # Bestimme die fehlerhaften Indizes: entweder UTC==0 oder GPS_Quality==0
+    mask = (utc_array == 0) | (gps_array == 0)
 
+    # Ersetze an diesen Indizes die fehlerhaften UTC-Werte durch die entsprechenden Einträge aus corrected_utc_full
+    corrected_utc_array = np.array(corrected_utc_full)
+    utc_array[mask] = corrected_utc_array[mask]
+
+    return utc_array.tolist()
 
 
 
@@ -575,8 +589,8 @@ def main():
     print("saving output")
     output_path = Path("output/multibeam")
     filtered_data.to_csv(output_path / "filtered_data.csv", index=False)
-    filtered_data.to_csv(output_path / "m_filtered_newedge.csv", index=False)
-    faulty_data.to_csv(output_path / "m_error_newedge.csv", index=False)
+    filtered_data.to_csv(output_path / "m_newutc_filtered_newedge.csv", index=False)
+    faulty_data.to_csv(output_path / "m_error_newutc_newedge.csv", index=False)
     #-filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
     #-  faulty_data.to_csv(output_path / "sum_multibeam_error.csv", index=False)
     #-selected_faulty_sum_data.to_csv(output_path / "sum_int_errors_selected.csv", index=False)
