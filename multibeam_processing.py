@@ -64,7 +64,7 @@ def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_he
         with file.open("r") as f:
             lines = f.readlines()
 
-        # extract data
+        # extract data   ------- change to read_csv()
         for i, line in enumerate(lines[1:]):  # skip header
             values = line.strip().split(",")
             row_dict = dict(zip(sum_header, values))
@@ -72,13 +72,13 @@ def assign_data_to_dataframe(data_dir: Path, sum_dataframe: pd.DataFrame, sum_he
                 "file_id": file_id,
                 "Utc": corrected_utc[i] if i < len(corrected_utc) else None,
                 "Lat": None,
-                "Long": None  # wird später zugewiesen
+                "Long": None  # gets assigned later
             })
             data_list.append(row_dict)
 
     # put data in dataframe
     sum_dataframe = pd.DataFrame(data_list, columns=sum_dataframe.columns)
-    sum_dataframe.to_csv("temp_newutclist.csv", index=False)
+
 
     return sum_dataframe
 
@@ -354,7 +354,7 @@ def detect_and_remove_faulty_depth(geodf_projected: gpd.GeoDataFrame, window_siz
 # Adding different error detection approach
 # looking for neighbors in 5m? radius, taking average of them, without middle points. If middle point is more than ?0.5m? off this mean, it gets deleted and safed to faulty points.
     # Sicherstellen, dass es ein GeoDataFrame ist
-def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_distance: int = 5, threshold: float = 0.6):
+def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_distance: int = 5, threshold: float = 0.5):
     if not isinstance(geodf_projected, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf must be gdf!")
     
