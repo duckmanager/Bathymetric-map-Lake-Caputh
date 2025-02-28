@@ -46,19 +46,23 @@ def calculate_depth_differences(transformed_gdf):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
     # max dist between points
-    max_distance = 0.5  # meters
+    max_distance = 0.05  # meters
     min_time_diff = pd.Timedelta(minutes=5)  # min timedifference between points
     
     # convert time column
     transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
     transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date
-    unique_dates = sorted(transformed_gdf['Date'].unique())
+
+    # notna for the artifical boundary points
+    unique_dates = sorted(transformed_gdf.loc[transformed_gdf['Date'].notna(), 'Date'].unique())
+
+    # unique_dates = sorted(transformed_gdf['Date'].unique())
     
     # setup date comparisons - also accepting same day crossings
     date_combinations = set(tuple(sorted((d1, d2))) for d1, d2 in combinations(unique_dates, 2))
     date_combinations.update((d, d) for d in unique_dates)
     
-    # Initialising dicts
+    # Initialising dicts - defaultdict just adds column if it dowsnt exists yet so its obsolete to check first
     depth_diff_dict = defaultdict(list)
     used_indices = set()
     
@@ -149,7 +153,60 @@ def calculate_depth_differences(transformed_gdf):
     return depth_diff_df, used_points_gdf
 """
 
+def calculate_depth_differences_close_points(transformed_gdf):
+    """
+    Berechnet die Tiefenunterschiede für Punkte, die sich in einem Abstand von weniger als 0,1 m befinden.
+    Die zeitliche Komponente wird ignoriert.
+    Gibt zusätzlich ein GeoDataFrame mit den verwendeten Punkten zurück,
+    gruppiert nach dem Aufnahmedatum.
+    """
+    # Check for GeoDataFrame
+    if not isinstance(transformed_gdf, gpd.GeoDataFrame):
+        raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
+    # Maximaler Abstand zwischen Punkten
+    max_distance = 0.05  # Meter
+
+    # Konvertiere Zeitspalte in datetime und extrahiere Datum
+    transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
+    transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date
+    unique_dates = sorted(transformed_gdf.loc[transformed_gdf['Date'].notna(), 'Date'].unique())
+    
+    # Initialisiere Dicts
+    depth_diff_dict = defaultdict(list)
+    used_indices = set()
+    
+    # Extrahiere notwendige Daten als NumPy-Arrays für schnelleren Zugriff
+    coords = np.vstack([transformed_gdf.geometry.x, transformed_gdf.geometry.y]).T
+    depths = transformed_gdf['Depth (m)'].values
+    dates = transformed_gdf['Date'].values
+    
+    # Erstelle cKDTree für effiziente Nachbarschaftssuche
+    tree = cKDTree(coords)
+    
+    # Suche Nachbarn innerhalb der Distanzgrenze
+    indices = tree.query_ball_tree(tree, max_distance)
+
+    for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Berechnung der Tiefenunterschiede"):
+        point_depth = depths[idx]
+        point_date = dates[idx]
+        
+        for neighbor_idx in neighbors:
+            if neighbor_idx != idx:  # Ausschließen des Punktes selbst
+                neighbor_date = dates[neighbor_idx]
+                depth_diff = abs(point_depth - depths[neighbor_idx])
+                date_pair = tuple(sorted((point_date, neighbor_date)))
+                depth_diff_dict[date_pair].append(depth_diff)
+                used_indices.add(idx)
+                used_indices.add(neighbor_idx)
+    
+    # Erstelle DataFrame mit den Tiefenunterschieden
+    depth_diff_df = pd.DataFrame(dict([(f"{k[0]}-{k[1]}", pd.Series(v)) for k, v in depth_diff_dict.items()]))
+    
+    # Erstelle ein GeoDataFrame mit allen verwendeten Punkten zur visuellen Kontrolle
+    used_points_gdf = transformed_gdf.loc[list(used_indices)].copy()
+    
+    return depth_diff_df, used_points_gdf
 
 
 # mean and std of the depth differences
@@ -163,11 +220,35 @@ def compute_statistics(depth_diff_df:pd.DataFrame):
         'StdDev': depth_diff_df.std()
     })
 
+    print(stats_df)
     # create a boxplot with the statistics - maybe change to saveing to files later 
     box_plot = depth_diff_df.boxplot()
+    box_plot.set_title("Depth difference at intersections")
     plt.show()
-    # add tilte, maybe better date format, axis text
+    # add tilte, maybe better date format, axis text, possibility to safe
     return stats_df, box_plot
+
+
+def compute_statistics2(depth_diff_df:pd.DataFrame):
+    """
+    Berechnet den Durchschnitt und die Standardabweichung jeder Spalte im DataFrame
+    und gibt das Ergebnis als neuen DataFrame zurück.
+    """
+    stats_df = pd.DataFrame({
+        'Mean': depth_diff_df.mean(),
+        'StdDev': depth_diff_df.std()
+    })
+
+    print(stats_df)
+    # create a boxplot with the statistics - maybe change to saveing to files later 
+    box_plot = depth_diff_df.boxplot()
+    box_plot.set_title("Depth difference of close points")
+    plt.show()
+    # add tilte, maybe better date format, axis text, possibility to safe
+    return stats_df, box_plot
+
+
+
 
 
 def main():
@@ -178,15 +259,20 @@ def main():
     filtered_data= gpd.GeoDataFrame(filtered_data_df, crs='EPSG:25833', geometry="geometry")
 
 
-    print("Calculating depth difference")
-    depth_difference, used_points_gdf= calculate_depth_differences(filtered_data)
+    print("Calculating depth difference on intersections")
+    depth_difference_intersections, used_points_intersections_gdf= calculate_depth_differences(filtered_data)
+
+    print("Calculating depth difference of close points")
+    depth_difference_closep, used_points_closep_gdf = calculate_depth_differences_close_points(filtered_data)
 
     print("calculating statics")
-    stats_df, box_plot = compute_statistics(depth_difference)
+    stats_intersec_df, boxintersec_plot = compute_statistics(depth_difference_intersections)
+    stats_closep_df, box_closep_plot = compute_statistics2(depth_difference_closep)
+
     print("saving data")
 
     data_output_dir = Path("output/multibeam/QC")
-    used_points_gdf.to_csv(data_output_dir/"QC_used_points.csv", index=False)
+    used_points_intersections_gdf.to_csv(data_output_dir/"QC_used_points.csv", index=False)
 
     input("done!")
 
