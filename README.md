@@ -38,7 +38,6 @@
 
 The edge measurments must be of the same day
 
-```
 
 
 
@@ -55,7 +54,8 @@ create_dataframe
 
 assign_data_to_dataframe
     input: data_dir: path of data
-            sum_dataframe: pandas DataFrame with headers of .sum file
+            sum_dataframe: pandas DataFrame with headers of .sum file 
+                [file_id, Utc, Lat, Long Sample #, Date/Time, Frequency (MHz), Profile Type, Depth (m), Latitude (deg), Longitude (deg), Heading (deg), Pitch (deg), Roll (deg), BT Depth (m), VB Depth (m), BT Beam1 Depth (m), BT Beam2 Depth (m), BT Beam3 Depth (m), BT Beam4 Depth (m), Track (m), DMG (m), Mean Speed (m/s), Boat Speed (m/s), Direction (deg), Boat Direction (deg)]
             sum_header: list of .sum file header
 
     output: sum_dataframe: pandas DataFrame with all data from the .sum files with corrected Utc times of the sonar internal GPS and the file_id (filename without fileendings) for identification
@@ -98,7 +98,70 @@ create_interpolated_points
     output: sum_df:DataFrame including .sum data, corrected utc and interpolated Long, -Lat /-X,-Y coordinates
 
     functionality: matches sonar samples with external GPS- Lat Long data by date and Utc.
-    External GPS has utc at the full second, sonar-GPS has utc with decimal-second. For higher precision, the approximated location at decimal second point gets interpolated. If deciaml second in corrected UTC= .0, the Long lat are used as interpolated long lat. If decimalsecond =/ 0, approximated position gets interpolated. For that, vector between consecutive samples gets created. X and Y - component of vector gets divided by decimal-second factor. Vecotr gets added to original Long Lat data and gets saved in Interpolated_log, - Lat.
+    External GPS has utc at the full second, sonar-GPS has utc with decimal-second. For higher precision, the approximated location at decimal second point gets interpolated. If deciaml second in corrected UTC= .0, the Long lat are used as interpolated long lat. If decimalsecond =/ 0, approximated position gets interpolated. For that, vector between consecutive samples gets created. X and Y - component of vector gets divided by decimal-second factor. Vector gets added to original Long Lat data and gets saved in Interpolated_log, - Lat.
 
+
+
+create_multibeam_points
+    input: sum_df: GeoDataFrame including .sum data, corrected utc and interpolated Long, -Lat /-X,-Y coordinates------------------------------------------------- is it gdf?
+
+    output: transformed_gdf: GeoDataFrame including [file_id], [Utc] - corrected utc, [Date/Time] - Date and time from the sonar internal clock without precise and reliable time, [Beam_type] (VB, Beam1-4), [Depth (m)] - Depth for each beam, [Longitude] -x,[Latitude] -y for each  Depth, [geometry] - pointgeometry in epsg 25833
+
+    functionality: The function iterates through sum_df rows, georeferecning the Depth of all five beams.
+    The boat heading direction in azimuth from .sum files gets used as orientation of the beams relative to the central/vertical beam (VB) and is therefore transformed to degrees.
+    Angles of beams to the VB are assigned in clockwise janus configuration (top view) and 25° angle relative to VB, based on (Sontek: RiverSurveyor S5/M9 System Manual) and (Sontek, a Xylem Brand: Webinar [https://www.youtube.com/watch?v=ukb-B9e5OTY], accessed: 15.02.25). Long/Lat of VB remain the same. Lat/Long of Beam 1-4 get calculated by 
+        new_x = VB_x + tan(radians(25)* VB-Depth) + Beam-y-angle    - with x= x-component/Longitude and y= Beamtyp (1-4)
     
 
+
+generate_boundary_points
+    input: data_dir - containing folder 'shp_files' with shp_file of studyed area
+                    - containing folder 'outline' with .csv with depth of all edge points measured (They dont have to cover all around the water body)
+                                        .csv has to contain for each point: [N] and [E] /y and x in ETRS89 / UTM zone 33N, [Depth (m)], [Date] - Date of edge point measuring (only one Date is possible) 
+
+    output: boundary_gdf: GeoDataFrame (epsg:25833): [geometry]- point geometry of each point, [Longitude], [Latitude] - x/y of each point in EPSG:25833, [Depth (m)] - Depth of each point, [file_id] = "artificial_boundary_points", [Date] - day of point measurement
+
+    input variables: spacing: distance between each edge point, in m
+                    interpoaltion_distance: distance between measured depth of edge point, within they get connected, in m
+                    extrapolation_distance: distance to extrapolate measured depth to the side without measured point within interpolation_distance, in m
+
+    functionality: creates artifical edge points for enhanced interpoaltion precision at the edges. Only interpolates near measured points.
+    Creates points with "spacing" distance between on the outline of -shp file of the water body. Connects each measured Depth point with the closest edge point. For measured points within "interpoaltion_distance" to each other, each point in between gets a depth assigned. The Depth gets linearly interpolated by the difference in depth between the measured points and the number of artifical edge points between. If no meassured point is within "interpolation_distance", edge points ~ within "extrapolation_distance" get assigend the same depth as last measured. All edge points without depth assigned get discraded.
+
+
+
+combine_multibeam_edge
+    input: geodf_projected: GeoDataFrame (output of generate_boundary_points)
+            boundary_gdf : GeoDataFrame (output of create_multibeam_points) or (output of detect_and_remove_faulty_depths if error detection is done without edge points)
+
+    output: gdf_combined: GeoDataFrame (epsg: 25833) [file_id], [Utc] - only for Beam-points, [Beam_type] - only for beam points, [Depth (m)], [Longitude], [Latitude], [geometry] - point geometry, [Date] - only for artifical_boundary_points
+
+    functionality: merges Beam measurements of create_multibeam_points and artifical edge points of generate_boundary_points into one GeoDataFrame. boundary_gdf can be inspected without multibeam points easily.
+
+
+adjust_depths
+    input: com_gdf: GeoDataFrame, output of combine_multibeam_edge
+    output: com_gdf, unchanged except [Depth (m)] has negativ values
+
+    functionality: changes measured depth distance into neagtiv depth values
+
+
+detect_and_remove_faulty_depths
+    input: geodf_projected, GeoDataFrame - output of adjust_depths or create_multibeam_points for correction without edge points
+    output: filtered_gdf: GeoDataFrame: all points after error filtering, columns unchanged
+            removed_gdf: GeoDataFrame containing all faulty filtered points, columns unchanged
+
+    input variables: max_distance (int) - radius of mean calculation
+                    threshold (float) - depth difference above which points get discarded
+
+    functionality: removes faulty points by comparing to averaged depth of sorrounding points.
+    Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artifical_boundary_point. Artifical edge points get recognised for average depth but wont be discarded as faulty points.
+
+
+
+
+
+
+
+
+```
