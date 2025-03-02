@@ -412,7 +412,9 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_dista
 
 def generate_boundary_points(data_dir):
     spacing = 1  # distamnce between artifical edge points in m (CRS EPSG:25833)
-    
+    interpolation_distance = 150 # distance to cover between measured points
+    extrapolation_distance= 15 # distance to extrapolate measured depth to the side without measured point within interpolation_distance
+
     # load lake edge and transform to line-geometry
     lake_boundary = gpd.read_file(data_dir / "shp_files" / "caplake_outline_final.shp").to_crs("EPSG:25833")
     boundary = lake_boundary.unary_union.exterior
@@ -452,9 +454,9 @@ def generate_boundary_points(data_dir):
     edge_gdf["next_depth"] = edge_gdf["Depth (m)"].shift(-1)
     edge_gdf["distance_to_next"] = edge_gdf.geometry.distance(edge_gdf["next_point"])
 
-    # Interpolation between measurment points if <150 m distance
+    # Interpolation between measurment points if <interpoaltion_distance m distance
     for _, row in edge_gdf.iterrows():
-        if pd.notna(row["next_depth"]) and row["distance_to_next"] < 150:
+        if pd.notna(row["next_depth"]) and row["distance_to_next"] < interpolation_distance:
             idx1 = row["nearest_boundary_idx"]
             idx2 = boundary_tree.query([row["next_point"].x, row["next_point"].y])[1]
             idx_start, idx_end = min(idx1, idx2), max(idx1, idx2)
@@ -480,7 +482,7 @@ def generate_boundary_points(data_dir):
     edge_gdf["distance_to_prev"] = edge_gdf.geometry.distance(edge_gdf["prev_point"])
 
     # Extrapolation entlang der Seeumrisslinie (zyklisch) in beide Richtungen
-    extrapolation_distance = 15  # in Meter
+
     num_extrap_points = int(extrapolation_distance / spacing)
 
     for _, row in edge_gdf.iterrows():
@@ -489,9 +491,9 @@ def generate_boundary_points(data_dir):
         idx = int(row["nearest_boundary_idx"])
         depth_value = row["Depth (m)"]
         
-        # Extrapolation in Vorwärtsrichtung:
-        # Bedingung: kein nächster Messpunkt vorhanden oder Abstand >=150 m
-        if pd.isna(row["next_depth"]) or row["distance_to_next"] >= 150:
+        # Extrapolation in forwards dircetion:
+        # Condition: no measured points within >=interpolation_distance m
+        if pd.isna(row["next_depth"]) or row["distance_to_next"] >= interpolation_distance:
             for i in range(1, num_extrap_points + 1):
                 forward_idx = (idx + i) % len(boundary_gdf)
                 # Fülle nur, wenn noch kein Wert gesetzt wurde
@@ -500,9 +502,9 @@ def generate_boundary_points(data_dir):
                 else:
                     break  # Stoppe, wenn bereits ein Wert existiert
                     
-        # Extrapolation in Rückwärtsrichtung:
-        # Bedingung: kein vorheriger Messpunkt vorhanden oder Abstand >=150 m
-        if pd.isna(row["prev_depth"]) or row["distance_to_prev"] >= 150:
+        # Extrapolate in backwards direction:
+        # Condition: no measured points within >=interpolation_distance m
+        if pd.isna(row["prev_depth"]) or row["distance_to_prev"] >= interpolation_distance:
             for i in range(1, num_extrap_points + 1):
                 backward_idx = (idx - i) % len(boundary_gdf)
                 if pd.isna(boundary_gdf.at[backward_idx, "depth"]):
@@ -542,6 +544,23 @@ def adjust_depths(com_gdf: gpd.GeoDataFrame):
 
 
 
+
+
+
+def filter_validation_points(com_gdf:gpd.GeoDataFrame):
+    # Mask for artifical edge points
+    mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
+
+    # Mask for filtering  - every tenth point, thats not an artifical edge point
+    indices = np.arange(len(com_gdf))
+    mask_filter = ~mask_boundary & (indices % 10 == 0)
+
+    # Seperate into two Geodataframes
+    gdf_validation_points = com_gdf[mask_filter].copy()
+    gdf_interpol_points = com_gdf[~mask_filter].copy()
+
+
+    return gdf_interpol_points, gdf_validation_points
 
 # reduce columns to necessary for map creation
 #def reduce_data(geodf_projected, faulty_gdf):
@@ -584,6 +603,9 @@ def main():
     
     print("detecting and removing faulty depths")
     filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf) # Reihenfolge umgekehrt
+
+    print("Removing points for validation")
+    gdf_com, gdf_validation_points= filter_validation_points(filtered_data)
     #-print("reducing data")
     #-selected_sum_data, selected_faulty_sum_data = reduce_data(filtered_data, faulty_data)
     print("saving output")
@@ -591,6 +613,10 @@ def main():
     filtered_data.to_csv(output_path / "filtered_data.csv", index=False)
     filtered_data.to_csv(output_path / "m_newutc_filtered_newedge.csv", index=False)
     faulty_data.to_csv(output_path / "m_error_newutc_newedge.csv", index=False)
+
+    gdf_com.to_csv(output_path / "multibeam_filtered_for_validation.csv", index=False)
+    gdf_validation_points.to_csv(output_path / "multibeam_validation_points.csv", index=False)
+
     #-filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
     #-  faulty_data.to_csv(output_path / "sum_multibeam_error.csv", index=False)
     #-selected_faulty_sum_data.to_csv(output_path / "sum_int_errors_selected.csv", index=False)
