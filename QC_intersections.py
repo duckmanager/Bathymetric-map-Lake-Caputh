@@ -33,7 +33,7 @@ filtered_data =main()"""
 
 
 
-def calculate_depth_differences(transformed_gdf):
+def calculate_depth_differences_intersections(transformed_gdf):
     """
     Berechnet die Tiefenunterschiede an Punkten, die sich an Kreuzungspunkten befinden,
     basierend auf einem Abstand von weniger als 0,5m und einer Zeitdifferenz von mehr als 5 Minuten.
@@ -46,7 +46,7 @@ def calculate_depth_differences(transformed_gdf):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
     # max dist between points
-    max_distance = 0.05  # meters
+    max_distance = 0.2  # meters
     min_time_diff = pd.Timedelta(minutes=5)  # min timedifference between points
     
     # convert time column
@@ -78,7 +78,7 @@ def calculate_depth_differences(transformed_gdf):
     # look on tree for neighbours in set distance - safe indices in list
     indices = tree.query_ball_tree(tree, max_distance)
 
-    for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Berechnung der Tiefenunterschiede"):
+    for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Calculating depth difference"):
         point_time = datetimes[idx]
         point_date = dates[idx]
         point_depth = depths[idx]
@@ -165,7 +165,7 @@ def calculate_depth_differences_close_points(transformed_gdf):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
     # Maximaler Abstand zwischen Punkten
-    max_distance = 0.05  # Meter
+    max_distance = 0.2  # Meter
 
     # Konvertiere Zeitspalte in datetime und extrahiere Datum
     transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
@@ -187,7 +187,7 @@ def calculate_depth_differences_close_points(transformed_gdf):
     # Suche Nachbarn innerhalb der Distanzgrenze
     indices = tree.query_ball_tree(tree, max_distance)
 
-    for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Berechnung der Tiefenunterschiede"):
+    for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Calculating depth difference"):
         point_depth = depths[idx]
         point_date = dates[idx]
         
@@ -209,8 +209,65 @@ def calculate_depth_differences_close_points(transformed_gdf):
     return depth_diff_df, used_points_gdf
 
 
+
+
+
 # mean and std of the depth differences
-def compute_statistics(depth_diff_df:pd.DataFrame):
+
+
+###############################################
+################################ change date format
+
+def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
+
+    """
+    Berechnet den Durchschnitt und die Standardabweichung jeder Spalte im DataFrame
+    und gibt das Ergebnis als neuen DataFrame zurück.
+    """
+    stats_df = pd.DataFrame({
+        'Mean': depth_diff_df.mean(),
+        'StdDev': depth_diff_df.std()
+    })
+
+    print(stats_df)
+
+
+    # create a boxplot with the statistics - maybe change to saveing to files later 
+    # determines scale of figure
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # create boxplot
+    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns], 
+                      labels=depth_diff_df.columns, patch_artist=True)
+
+    # change date formatting
+
+
+    # scales uniform height of count for used points per boxplot
+    y_pos = max(depth_diff_df.max(skipna=True)) * 1.1 if not depth_diff_df.isna().all().all() else 1
+
+    # shows count for used points per boxplot
+    for i, col in enumerate(depth_diff_df.columns, start=1):
+        n_points = depth_diff_df[col].count()
+        ax.text(i, y_pos, f"n={n_points}", ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # axis label and title
+    ax.set_xlabel("Daten überschneidener Messreihen")
+    ax.set_ylabel("Tiefenunterschied (m)")
+    ax.set_title("Tiefenunterschiede überschneidener Messreihen")
+
+    # x-and y- axis modifications
+    plt.xticks(rotation=45, ha='right')
+    ax.set_ylim(None, y_pos * 1.2)  # Extra Platz nach oben
+
+    plt.tight_layout()
+    plt.show()
+
+    # add tilte, maybe better date format, axis text, possibility to safe
+    return stats_df, box
+
+
+def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
     """
     Berechnet den Durchschnitt und die Standardabweichung jeder Spalte im DataFrame
     und gibt das Ergebnis als neuen DataFrame zurück.
@@ -222,30 +279,33 @@ def compute_statistics(depth_diff_df:pd.DataFrame):
 
     print(stats_df)
     # create a boxplot with the statistics - maybe change to saveing to files later 
-    box_plot = depth_diff_df.boxplot()
-    box_plot.set_title("Depth difference at intersections")
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # create boxplot
+    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns], 
+                      labels=depth_diff_df.columns, patch_artist=True)
+
+    # scales uniform height of count for used points per boxplot
+    y_pos = max(depth_diff_df.max(skipna=True)) * 1.1 if not depth_diff_df.isna().all().all() else 1
+
+    # shows count for used points per boxplot
+    for i, col in enumerate(depth_diff_df.columns, start=1):
+        n_points = depth_diff_df[col].count()
+        ax.text(i, y_pos, f"n={n_points}", ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+    # axis label and title
+    ax.set_xlabel("Daten verglichener Punkte")
+    ax.set_ylabel("Tiefenunterschied (m)")
+    ax.set_title("Tiefenunterschiede naheliegender Punkte")
+
+    # x-and y- axis modifications
+    plt.xticks(rotation=45, ha='right')
+    ax.set_ylim(None, y_pos * 1.2)  # Extra Platz nach oben
+
+    plt.tight_layout()
     plt.show()
     # add tilte, maybe better date format, axis text, possibility to safe
-    return stats_df, box_plot
-
-
-def compute_statistics2(depth_diff_df:pd.DataFrame):
-    """
-    Berechnet den Durchschnitt und die Standardabweichung jeder Spalte im DataFrame
-    und gibt das Ergebnis als neuen DataFrame zurück.
-    """
-    stats_df = pd.DataFrame({
-        'Mean': depth_diff_df.mean(),
-        'StdDev': depth_diff_df.std()
-    })
-
-    print(stats_df)
-    # create a boxplot with the statistics - maybe change to saveing to files later 
-    box_plot = depth_diff_df.boxplot()
-    box_plot.set_title("Depth difference of close points")
-    plt.show()
-    # add tilte, maybe better date format, axis text, possibility to safe
-    return stats_df, box_plot
+    return stats_df, box
 
 
 
@@ -260,14 +320,14 @@ def main():
 
 
     print("Calculating depth difference on intersections")
-    depth_difference_intersections, used_points_intersections_gdf= calculate_depth_differences(filtered_data)
+    depth_difference_intersections, used_points_intersections_gdf= calculate_depth_differences_intersections(filtered_data)
 
     print("Calculating depth difference of close points")
     depth_difference_closep, used_points_closep_gdf = calculate_depth_differences_close_points(filtered_data)
 
     print("calculating statics")
-    stats_intersec_df, boxintersec_plot = compute_statistics(depth_difference_intersections)
-    stats_closep_df, box_closep_plot = compute_statistics2(depth_difference_closep)
+    stats_intersec_df, boxintersec_plot = compute_statistics_intersections(depth_difference_intersections)
+    stats_closep_df, box_closep_plot = compute_statistics_closepoints(depth_difference_closep)
 
     print("saving data")
 
