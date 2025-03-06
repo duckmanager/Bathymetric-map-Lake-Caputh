@@ -36,12 +36,23 @@
 }
 
 
-The edge measurments must be of the same day
-
-
-
-
 Functions of multibeam_processing
+  
+    general informations:
+    Combine sonar and GPS data, optimize data quality and add seperatly measured edge points to create a dataset usable in GIS-interpolations.
+
+required packages:
+- pathlib
+- pandas
+- geopandas
+- shapely.geometry
+- numpy
+- pymatreader
+- datetime
+- scipy.spatial
+- collections
+- tqdm
+
 
 create_dataframe
     input: data_dir: path of data
@@ -126,7 +137,7 @@ generate_boundary_points
                     extrapolation_distance: distance to extrapolate measured depth to the side without measured point within interpolation_distance, in m
 
     functionality: creates artifical edge points for enhanced interpoaltion precision at the edges. Only interpolates near measured points.
-    Creates points with "spacing" distance between on the outline of -shp file of the water body. Connects each measured Depth point with the closest edge point. For measured points within "interpoaltion_distance" to each other, each point in between gets a depth assigned. The Depth gets linearly interpolated by the difference in depth between the measured points and the number of artifical edge points between. If no meassured point is within "interpolation_distance", edge points ~ within "extrapolation_distance" get assigend the same depth as last measured. All edge points without depth assigned get discraded.
+    Creates points with "spacing" distance between on the outline of -shp file of the water body. Uses cKDTress for neighor identification. Connects each measured Depth point with the closest edge point. For measured points within "interpoaltion_distance" to each other, each point in between gets a depth assigned. The Depth gets linearly interpolated by the difference in depth between the measured points and the number of artifical edge points between. If no meassured point is within "interpolation_distance", edge points ~ within "extrapolation_distance" get assigend the same depth as last measured. All edge points without depth assigned get discraded.
 
 
 
@@ -155,7 +166,7 @@ detect_and_remove_faulty_depths
                     threshold (float) - depth difference above which points get discarded
 
     functionality: removes faulty points by comparing to averaged depth of sorrounding points.
-    Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artifical_boundary_point. Artifical edge points get recognised for average depth but wont be discarded as faulty points.
+    Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. Uses cKDTress for neighor identification. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artifical_boundary_point. Artifical edge points get recognised for average depth but wont be discarded as faulty points.
 
 
 
@@ -164,4 +175,59 @@ detect_and_remove_faulty_depths
 
 
 
+
+Functions of QC_closepoints:
+    Used to determine the Depth difference of close points and show their distribution grouped by dates.
+
+    used libraries:
+    import pandas as pd
+    import geopandas as gpd
+    import matplotlib.pyplot as plt
+    from shapely import wkt
+    from pathlib import Path
+    from tqdm import tqdm
+    from scipy.spatial import cKDTree
+    import numpy as np
+    from collections import defaultdict
+
+
+
+    general informations:
+    filtered_data.csv from multibeam_processing has to be saved in output/multibeam. It has to include the filtered sonar measurments as it is used for interpoaltion. It can conatin the edge points, those wont be assessed in the quality controle. 
+    Important: The Date/Time column has to contain the correct date and roughly correct timestamps. The timestamps can be wrong, as long as they are wrong for the whole survey day.
+
+
+    filtered_data.csv is read from output/multibeam and converted to GeoDataFrame.
+
+    calculate_depth_differences_intersections
+    input: transformed_gdf (filtered_data_GeoDataFrame)
+    output: depth_diff_df: pandas.DataFrame including one column for each date_combination including itself with itself and depth differences measured in these date-combinations within the specfied ranges. Column formatting [YYYY-MM-DD-YYYY-MM-DD].
+            used_points_gdf: GeoDataFrame including all points compared in 'calculate_depth_differences_intersections'. Formatting is the same as filtered_data_gdf.
+
+    variables: max_distance: max distance between poits for them to be compaired as neighbor points
+                min_time_diff: min time difference between 'Date/Time' column of two points, for them to be compaired as neighbor points.
+    
+    functionlity: Determines all neighbor points in the requirments, so only survey crossings get recognized, not points in direct sequence. Neighbor points are determined using a cKDTree algorithm. The Depth differences get grouped by the combination of dates, they were measured at. each Depth combination only gets caluclated once. This is ensured as only the neighbor of a single point get used for difference calculations, that were measured to an earlier time. This prevents calculation of a-b and b-a. The depth difference gets calculated by earlier point - later point.
+
+    calculate_depth_differences_close_points
+    input: same as 'calculate_depth_differences_intersections' (transformed_gdf)
+    output: same as 'calculate_depth_differences_intersections' (depth_diff_df, used_points_gdf)
+
+    variables: max_distance: max distance between poits for them to be compaired as neighbor points
+
+    functionality: The functionality is the same as 'max distance between poits for them to be compaired as neighbor points'. But no min time difference is defined, so all points within the distance get calculated resulting in comparison of consecutive points of the same survey if they are within the distance requirements. The difference groups of differnt days are the same as in 'calculate_depth_differences_intersections', if max_distance ist the same.
+
+
+compute_statistics_intersections
+    input: depth_diff_df - pandas DataFrame, ouput of 'calculate_depth_differences_intersections'
+    output: stats_df: DataFrame with columns [Mean], [StdDev] and row for each date combination
+            box: boxplot-informations ?????????????????????????????????????????????????
+
+    functionality: Caluclates mean and standartdeviation of 'calculate_depth_differences_intersections' for each date-combination. Outputs a boxplot with distribution of depth differences for each date-combination and the count of depth difference values in each boxplot above it. 
+
+compute_statistics_closepoints
+input: depth_diff_df - pandas DataFrame, ouput of 'calculate_depth_differences_close_points'
+    output: stats_df: DataFrame with columns [Mean], [StdDev] and row for each date combination
+            box: boxplot-informations ?????????????????????????????????????????????????
+    functionality: same as 'compute_statistics_intersections' but boxplot labels optimized for 'calculate_depth_differences_close_points'.
 ```
