@@ -37,79 +37,100 @@ def calculate_depth_differences_intersections(transformed_gdf):
     """
     Berechnet die Tiefenunterschiede an Punkten, die sich an Kreuzungspunkten befinden,
     basierend auf einem Abstand von weniger als 0,5m und einer Zeitdifferenz von mehr als 5 Minuten.
-    Berücksichtigt nun auch Punkte mit dem gleichen Aufnahmedatum.
-    Optimiert mit cKDTree für schnellere Nachbarschaftssuche.
-    Gibt zusätzlich ein GeoDataFrame mit den verwendeten Punkten zurück.
+    Die Differenzen werden nach Tagen gruppiert, und es wird sichergestellt, dass immer der spätere
+    Wert minus den früheren Wert berechnet wird. Punkte mit file_id == "artificial_boundary_points"
+    werden ignoriert.
     """
-    # check for GeoDataFrame
+    
+    # Check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
-    # max dist between points
+    # maximal distance and maximal time difference for neighbors
     max_distance = 0.2  # meters
-    min_time_diff = pd.Timedelta(minutes=5)  # min timedifference between points
-    
-    # convert time column
+    min_time_diff = pd.Timedelta(minutes=5)  # min time difference between points
+
+    # remove all "artifical edge points"
+    transformed_gdf = transformed_gdf[transformed_gdf['file_id'] != "artificial_boundary_points"].copy()
+
+    # Check if all data was removed
+    if transformed_gdf.empty:
+        raise ValueError("No data left after removing artifical edge points!")
+
+    # Convert Date/Time to pdandas datetime - sonar internal Date and time being used, not backed up by GPS time!
     transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
-    transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date
+    
+    # Check for daulty timestamps
+    if transformed_gdf['DateTime'].isna().any():
+        raise ValueError("Error with Date/Time timestamps! Date/Time is empty or conversion to pd.datetime failed")
 
-    # notna for the artifical boundary points
-    unique_dates = sorted(transformed_gdf.loc[transformed_gdf['Date'].notna(), 'Date'].unique())
+    transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date  # Ectract date for comparison
 
-    # unique_dates = sorted(transformed_gdf['Date'].unique())
-    
-    # setup date comparisons - also accepting same day crossings
-    date_combinations = set(tuple(sorted((d1, d2))) for d1, d2 in combinations(unique_dates, 2))
-    date_combinations.update((d, d) for d in unique_dates)
-    
-    # Initialising dicts - defaultdict just adds column if it dowsnt exists yet so its obsolete to check first
-    depth_diff_dict = defaultdict(list)
-    used_indices = set()
-    
-    # Extract necessary data into numpy array for fast access
+    # Extract data to numpy array for vectorised calculations
     coords = np.vstack([transformed_gdf.geometry.x, transformed_gdf.geometry.y]).T
     depths = transformed_gdf['Depth (m)'].values
-    datetimes = transformed_gdf['DateTime'].values # could be changed to use UTC
+    datetimes = transformed_gdf['DateTime'].values
     dates = transformed_gdf['Date'].values
-    
-    # create cKDTree for efficient neighbor search
+
+    # cKDTree for efficent neighbor search
     tree = cKDTree(coords)
     
-    # look on tree for neighbours in set distance - safe indices in list
+    # find neighbors in defined distance 
     indices = tree.query_ball_tree(tree, max_distance)
 
+    depth_diff_dict = defaultdict(list)
+    used_indices = set()
+
+    # Iterate over all points and calculate depth difference
     for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Calculating depth difference"):
         point_time = datetimes[idx]
         point_date = dates[idx]
         point_depth = depths[idx]
         
-        # Extract time-stamps as numpy-arrays
+        # Don't take difference with itself
+        neighbors = [n for n in neighbors if n != idx]
+
+        if not neighbors:
+            continue  # skip if no neighbors exist
+
+        # convert neighbors list into numpy array
         neighbor_times = datetimes[neighbors]
         neighbor_dates = dates[neighbors]
         neighbor_depths = depths[neighbors]
         
-        # calculate the time differences
-        time_diffs = np.abs(neighbor_times - point_time)
+        # Check which neighbor points were measured later, than center point (date and time), so depth differences wont be doubled (e.g: a-b & b-a) 
+        valid_mask = (neighbor_dates > point_date) | ((neighbor_dates == point_date) & (neighbor_times > point_time))
+        valid_time_mask = (neighbor_times - point_time) > min_time_diff
         
-        # find neighbors with time difference
-        valid_neighbor_mask = time_diffs > min_time_diff
-        valid_neighbors = np.array(neighbors)[valid_neighbor_mask]
-        valid_dates = neighbor_dates[valid_neighbor_mask]
-        valid_depths = neighbor_depths[valid_neighbor_mask]
-        
-        # save valid neighbors
-        for match_date, match_depth in zip(valid_dates, valid_depths):
-            date_pair = tuple(sorted((point_date, match_date)))
-            depth_diff_dict[date_pair].append(abs(point_depth - match_depth))
+        final_valid_mask = valid_mask & valid_time_mask
+        valid_neighbors = np.array(neighbors)[final_valid_mask]
+        valid_depths = neighbor_depths[final_valid_mask]
+        valid_times = neighbor_times[final_valid_mask]
+        valid_dates = neighbor_dates[final_valid_mask]
+
+        # Save differences with valid order
+        for neighbor_idx, match_depth, match_time, match_date in zip(valid_neighbors, valid_depths, valid_times, valid_dates):
+            # Calculate in correct order: earlier point - later point
+            if match_time > point_time:
+                depth_diff = point_depth - match_depth  # switch for later - eralier point
+                earlier_date, later_date = point_date, match_date
+            else:
+                depth_diff = match_depth - point_depth  # switch for later - eralier point
+                earlier_date, later_date = match_date, point_date
+
+            
+            date_pair = tuple(sorted((earlier_date, later_date)))
+            depth_diff_dict[date_pair].append(depth_diff)
+
             used_indices.add(idx)
-            used_indices.update(valid_neighbors)
-    
-    # create dataframe with depth differences from dict with each column starting in the first line
+            used_indices.add(neighbor_idx)
+
+    # Create Dataframe grouped by measuremnt days
     depth_diff_df = pd.DataFrame(dict([(f"{k[0]}-{k[1]}", pd.Series(v)) for k, v in depth_diff_dict.items()]))
-    
-    # Create a GeodataFrame with all used points for visual controle
+
+    # create geodataframe with all used points for validation
     used_points_gdf = transformed_gdf.loc[list(used_indices)].copy()
-    
+
     return depth_diff_df, used_points_gdf
     
     
@@ -155,57 +176,92 @@ def calculate_depth_differences_intersections(transformed_gdf):
 
 def calculate_depth_differences_close_points(transformed_gdf):
     """
-    Berechnet die Tiefenunterschiede für Punkte, die sich in einem Abstand von weniger als 0,1 m befinden.
-    Die zeitliche Komponente wird ignoriert.
-    Gibt zusätzlich ein GeoDataFrame mit den verwendeten Punkten zurück,
-    gruppiert nach dem Aufnahmedatum.
+    Berechnet die Tiefenunterschiede für Punkte, die sich in einem Abstand von weniger als 0,2 m befinden.
+    Die Differenzen werden nach Tagen gruppiert, und es wird sichergestellt, dass immer der spätere
+    Wert minus den früheren Wert berechnet wird. Punkte mit file_id == "artificial_boundary_points" werden ignoriert.
+    Gibt zusätzlich ein GeoDataFrame mit den verwendeten Punkten zurück.
     """
+    
     # Check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
-    # Maximaler Abstand zwischen Punkten
-    max_distance = 0.2  # Meter
+    # max distance betweeen points
+    max_distance = 0.2  # meters
 
-    # Konvertiere Zeitspalte in datetime und extrahiere Datum
+    # Entferne alle "artificial_boundary_points"
+    transformed_gdf = transformed_gdf[transformed_gdf['file_id'] != "artificial_boundary_points"].copy()
+
+    # check if data exists after filtering
+    if transformed_gdf.empty:
+        raise ValueError("Error: No data after removing artifical boundary points!")
+
+    # extract date
     transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
-    transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date
-    unique_dates = sorted(transformed_gdf.loc[transformed_gdf['Date'].notna(), 'Date'].unique())
     
-    # Initialisiere Dicts
+    # check for error in timestamps
+    if transformed_gdf['DateTime'].isna().any():
+        raise ValueError("Error with Date/Time timestamps! Date/Time is empty or conversion to pd.datetime failed")
+
+    transformed_gdf['Date'] = transformed_gdf['DateTime'].dt.date
+
+    # Initialise dicts
     depth_diff_dict = defaultdict(list)
     used_indices = set()
-    
-    # Extrahiere notwendige Daten als NumPy-Arrays für schnelleren Zugriff
+
+    # extract data to Numpy array for faster processing
     coords = np.vstack([transformed_gdf.geometry.x, transformed_gdf.geometry.y]).T
     depths = transformed_gdf['Depth (m)'].values
+    datetimes = transformed_gdf['DateTime'].values
     dates = transformed_gdf['Date'].values
-    
-    # Erstelle cKDTree für effiziente Nachbarschaftssuche
+
+    # cKDTree for efficent neighbor identification
     tree = cKDTree(coords)
-    
-    # Suche Nachbarn innerhalb der Distanzgrenze
+
+    # Look for neighbors in set distance
     indices = tree.query_ball_tree(tree, max_distance)
 
+    # Iterate over all neighbor points to calculate depth difference
     for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="Calculating depth difference"):
         point_depth = depths[idx]
         point_date = dates[idx]
-        
-        for neighbor_idx in neighbors:
-            if neighbor_idx != idx:  # Ausschließen des Punktes selbst
-                neighbor_date = dates[neighbor_idx]
-                depth_diff = abs(point_depth - depths[neighbor_idx])
-                date_pair = tuple(sorted((point_date, neighbor_date)))
-                depth_diff_dict[date_pair].append(depth_diff)
-                used_indices.add(idx)
-                used_indices.add(neighbor_idx)
-    
-    # Erstelle DataFrame mit den Tiefenunterschieden
+        point_time = datetimes[idx]
+
+        # Dont take difference with itself
+        neighbors = [n for n in neighbors if n != idx]
+
+        if not neighbors:
+            continue  # skip if no neighbor exists
+
+        # Convert list of neigbor points to numpy-array
+        neighbor_depths = depths[neighbors]
+        neighbor_dates = dates[neighbors]
+        neighbor_times = datetimes[neighbors]
+
+        # Calculate difference and save it grouped by survey days
+        for neighbor_idx, match_depth, match_time, match_date in zip(neighbors, neighbor_depths, neighbor_times, neighbor_dates):
+            # Only calculate earlier point - later point, switch for opposit
+            if match_time > point_time:
+                depth_diff = point_depth - match_depth  # switch for later - erlier point!
+                earlier_date, later_date = point_date, match_date
+            else:
+                depth_diff = match_depth - point_depth  # switch for later - erlier point!
+                earlier_date, later_date = match_date, point_date
+
+
+            date_pair = tuple(sorted((earlier_date, later_date)))
+
+            # Save by date gorup
+            depth_diff_dict[date_pair].append(depth_diff)
+            used_indices.add(idx)
+            used_indices.add(neighbor_idx)
+
+    # Create dataframe grouped by dates
     depth_diff_df = pd.DataFrame(dict([(f"{k[0]}-{k[1]}", pd.Series(v)) for k, v in depth_diff_dict.items()]))
-    
-    # Erstelle ein GeoDataFrame mit allen verwendeten Punkten zur visuellen Kontrolle
+
+    # Geodataframe with used points for validation
     used_points_gdf = transformed_gdf.loc[list(used_indices)].copy()
-    
+
     return depth_diff_df, used_points_gdf
 
 
@@ -326,7 +382,9 @@ def main():
     depth_difference_closep, used_points_closep_gdf = calculate_depth_differences_close_points(filtered_data)
 
     print("calculating statics")
+    print("statics depth difference intersections")
     stats_intersec_df, boxintersec_plot = compute_statistics_intersections(depth_difference_intersections)
+    print("statistics depth diffference close points")
     stats_closep_df, box_closep_plot = compute_statistics_closepoints(depth_difference_closep)
 
     print("saving data")
