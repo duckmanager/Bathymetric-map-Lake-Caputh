@@ -133,9 +133,9 @@ def get_gps_dataframe(data_dir: Path):
             if line.startswith("#BESTPOSA"):
                 bestposa_raw = line.split(",")
                 if bestposa_raw[10].replace(".", "").isdigit():
-                    bestposa = (bestposa_raw[10], bestposa_raw[11])
+                    bestposa = (bestposa_raw[10], bestposa_raw[11], bestposa_raw[15], bestposa_raw[16], bestposa_raw[17]) # 
                 else:
-                    bestposa = (bestposa_raw[11], bestposa_raw[12])
+                    bestposa = (bestposa_raw[11], bestposa_raw[12], bestposa_raw[16], bestposa_raw[17], bestposa_raw[18])
 
             # couple Bestposa with next GPZDA line
             elif line.startswith("$GPZDA"):
@@ -148,7 +148,12 @@ def get_gps_dataframe(data_dir: Path):
                         "date": date,
                         "utc": int(float(time)),
                         "lat": bestposa[0],  
-                        "long": bestposa[1]
+                        "long": bestposa[1],
+                        "DOP (lat)": float(bestposa[2]),
+                        "DOP (lon)": float(bestposa[3]),
+                        "VDOP": float(bestposa[4]),
+
+
                     })
                 except ValueError as e:
                     print(f"error at {gps_file.name}: {e}")
@@ -171,73 +176,93 @@ def get_gps_dataframe(data_dir: Path):
 # Debugging-Ausgaben in der Interpolationsfunktion platzieren
 
 def create_interpolated_coords(sum_df, gps_gdf):
-    interpolated_coords = []
+    # Speichere die ursprünglichen Spalten von sum_df
+    original_columns_sum_df = sum_df.columns.tolist()
 
-    # shorten Date/Time to only date in same format as in gps-files
+    # Datumsumwandlung in sum_df (Datum als Tupel: (Tag, Monat, Jahr))
     sum_df['date'] = pd.to_datetime(sum_df['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
     sum_df['date'] = sum_df['date'].apply(lambda x: (x.day, x.month, x.year) if pd.notnull(x) else None)
-
-    # fails when using - but in general not necessary, only for different gps format
-    # gps_gdf['date'] = gps_gdf['date'].apply(lambda x: (x.day, x.month, x.year))
-########probably not necessary
-    # make sure, gps date is in correct format
+    
+    # In gps_gdf sicherstellen, dass das Datum als Tupel vorliegt
     gps_gdf['date'] = gps_gdf['date'].apply(lambda x: (int(x[0]), int(x[1]), int(x[2])))
 
-    # make sure sum date is in correct format
-    sum_df['Utc'] = sum_df['Utc'].astype(str)
-    gps_gdf['utc'] = gps_gdf['utc'].astype(str).str.zfill(6) 
-#########
-    # Iterate through gps file to safe same dates in one nested dict, to iterate more easy later
-    gps_dict = {date: df.reset_index(drop=True) for date, df in gps_gdf.groupby('date')}
+    # Umwandlung der Uhrzeit in sum_df: 
+    sum_df['utc_float'] = pd.to_numeric(sum_df['Utc'], errors='coerce')
+    sum_df['utc_int'] = sum_df['utc_float'].apply(np.floor).astype('Int64')
+    sum_df['frac'] = sum_df['utc_float'] - sum_df['utc_int']
+    
+    # Ursprüngliche Indizes speichern
+    gps_gdf = gps_gdf.reset_index().rename(columns={'index': 'orig_index'})
+    
+    # Sortiere gps_gdf nach Datum und Uhrzeit
+    gps_gdf = gps_gdf.sort_values(['date', 'utc']).reset_index(drop=True)
+    
+    # Erzeuge nächste Werte für GPS-Daten
+    gps_gdf['geom_x'] = gps_gdf['geometry'].x
+    gps_gdf['geom_y'] = gps_gdf['geometry'].y
+    gps_gdf['next_geom_x'] = gps_gdf.groupby('date')['geom_x'].shift(-1)
+    gps_gdf['next_geom_y'] = gps_gdf.groupby('date')['geom_y'].shift(-1)
+    gps_gdf['next_utc'] = gps_gdf.groupby('date')['utc'].shift(-1)
+    gps_gdf['next_DOP_lat'] = gps_gdf.groupby('date')['DOP (lat)'].shift(-1)
+    gps_gdf['next_DOP_lon'] = gps_gdf.groupby('date')['DOP (lon)'].shift(-1)
+    
+    # Merge sum_df mit gps_gdf
+    print("Mergen von GPS-Daten mit sum_df...")
+    merged = pd.merge(sum_df, gps_gdf, left_on=['date', 'utc_int'], right_on=['date', 'utc'], how='left', suffixes=('', '_gps'))
+    
+    # Fehlermeldung für fehlende Matches
+    no_match = merged['utc'].isna()
+    if no_match.any():
+        print(f"Fehler: {no_match.sum()} Einträge haben keine exakte Uhrzeit gefunden und werden entfernt.")
 
-    # Iterate over sum-data
-    for idx, row in tqdm(sum_df.iterrows(), total=sum_df.shape[0]):
-        date = row['date']
-        utc_full = row['Utc']  # Format HHMMSS.s
+    # Prüfung, ob der "nächste" Punkt exakt eine Sekunde später liegt
+    correct_timing = merged['next_utc'] == merged['utc'] + 1
 
-        # seperate time in full seconds and decimal part
-        try:
-            utc_str, decimal_str = utc_full.split('.')
-            decimal_part = int(decimal_str)
-        except ValueError:
-            interpolated_coords.append((None, None))
-            continue
+    # Prüfung, ob sowohl der aktuelle als auch der nächste Punkt die DOP-Kriterien erfüllen
+    valid = (
+        (merged['DOP (lat)'] <= 0.1) &
+        (merged['DOP (lon)'] <= 0.1) &
+        (merged['next_DOP_lat'] <= 0.1) &
+        (merged['next_DOP_lon'] <= 0.1) &
+        correct_timing
+    )
 
-        # access gps data for same date
-        gps_day = gps_dict.get(date)
-        if gps_day is None:
-            interpolated_coords.append((None, None))
-            continue
+    # Berechnung der interpolierten Koordinaten
+    merged['Interpolated_Long'] = np.where(
+        valid,
+        merged['geom_x'] + merged['frac'] * (merged['next_geom_x'] - merged['geom_x']),
+        None
+    )
 
-        # Find index of same UTC in gps-data
-        gps_index = gps_day[gps_day['utc'] == utc_str].index
+    merged['Interpolated_Lat'] = np.where(
+        valid,
+        merged['geom_y'] + merged['frac'] * (merged['next_geom_y'] - merged['geom_y']),
+        None
+    )
+    
+    # Zähle, wie viele Einträge nicht interpoliert wurden
+    removed_points = merged['Interpolated_Long'].isna().sum()
+    print(f"Entfernte Punkte: {removed_points} (keine gültige Interpolation möglich).")
+    
+    # Entferne alle Zeilen mit NaN in den interpolierten Koordinaten
+    merged = merged.dropna(subset=['Interpolated_Long', 'Interpolated_Lat'])
 
-        if not gps_index.empty:
-            idx = gps_index[0]  # Index of exact time 
+    # Speichere die ursprünglichen Spalten + interpolierte Koordinaten in sum_df
+    sum_df = merged[original_columns_sum_df + ['Interpolated_Long', 'Interpolated_Lat']].copy()
+    
+    # Sammle die benutzten GPS-Punkte (basierend auf dem ursprünglichen Index) und behalte nur die Originalspalten
+    used_idx = merged['orig_index'].dropna().unique()
+    used_gps_gdf = gps_gdf[gps_gdf['orig_index'].isin(used_idx)].copy()
 
-            # check for following point
-            if idx + 1 < len(gps_day):
-                before_point = gps_day.iloc[idx]
-                after_point = gps_day.iloc[idx + 1]
+    # Behalte nur die ursprünglichen Spalten in used_gps_gdf
+    used_gps_gdf = used_gps_gdf[['date', 'utc', 'lat', 'long', 'DOP (lat)', 'DOP (lon)', 'VDOP', 'geometry']]
 
-                # Interpolation of coordinates
-                interp_factor = decimal_part / 10.0
-                x_interp = before_point.geometry.x + interp_factor * (after_point.geometry.x - before_point.geometry.x)
-                y_interp = before_point.geometry.y + interp_factor * (after_point.geometry.y - before_point.geometry.y)
+    return sum_df, used_gps_gdf
 
-                interpolated_coords.append((x_interp, y_interp))
-            else:
-                # if no following point exists
-                interpolated_coords.append((None, None))
-        else:
-            # empty if no fitting gps point is found
-            interpolated_coords.append((None, None))
 
-    # Add interpoalted coords to dataframe
-    sum_df['Interpolated_Long'] = [coord[0] for coord in interpolated_coords]
-    sum_df['Interpolated_Lat'] = [coord[1] for coord in interpolated_coords]
+# def filter_by_gps_quality(sum_df):
 
-    return sum_df
+
 
 
 def create_multibeam_points(sum_df: gpd.GeoDataFrame):
@@ -549,16 +574,24 @@ def adjust_depths(com_gdf: gpd.GeoDataFrame):
 
 def filter_validation_points(com_gdf:gpd.GeoDataFrame):
     # Mask for artifical edge points
-    mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
-
-    # Mask for filtering  - every tenth point, thats not an artifical edge point
+    """    mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
     indices = np.arange(len(com_gdf))
-    mask_filter = ~mask_boundary & (indices % 10 == 0)
+    mask_filter = ~mask_boundary & (indices % 10 == 0)"""
+    """    # Mask for filtering  - every tenth point, thats not an artifical edge point
+    indices = np.arange(len(com_gdf))
+    mask_filter = (indices % 2 == 0)
 
     # Seperate into two Geodataframes
     gdf_validation_points = com_gdf[mask_filter].copy()
-    gdf_interpol_points = com_gdf[~mask_filter].copy()
+    gdf_interpol_points = com_gdf[~mask_filter].copy()"""
 
+     # calculate without boundary points
+    mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
+    indices = np.arange(len(com_gdf))
+    mask_filter = ~mask_boundary & (indices % 7 == 0)
+
+    gdf_validation_points = com_gdf[mask_filter].copy()
+    gdf_interpol_points = com_gdf[~mask_filter & ~mask_boundary].copy()
 
     return gdf_interpol_points, gdf_validation_points
 
@@ -584,7 +617,7 @@ def main():
     print("starting get_gps")
     gps_geodf_projected = get_gps_dataframe(data_dir) #including interpolation
     print("creating interpolated points")
-    interpolated_sum = create_interpolated_coords(sum_dataframe, gps_geodf_projected)
+    interpolated_sum, used_gps_gdf = create_interpolated_coords(sum_dataframe, gps_geodf_projected)
 
     print("create multibeam points")
     multipoint_gdf = create_multibeam_points(interpolated_sum)
@@ -616,6 +649,10 @@ def main():
 
     gdf_com.to_csv(output_path / "multibeam_filtered_for_validation.csv", index=False)
     gdf_validation_points.to_csv(output_path / "multibeam_validation_points.csv", index=False)
+
+    output_QC_path = Path("output/multibeam/QC")
+    used_gps_gdf.to_csv(output_QC_path / "used_GPS_points.csv", index=False)
+
 
     #-filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
     #-  faulty_data.to_csv(output_path / "sum_multibeam_error.csv", index=False)
