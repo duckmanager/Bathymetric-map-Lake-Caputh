@@ -176,85 +176,83 @@ def get_gps_dataframe(data_dir: Path):
 # Debugging-Ausgaben in der Interpolationsfunktion platzieren
 
 def create_interpolated_coords(sum_df, gps_gdf):
-    # Speichere die ursprünglichen Spalten von sum_df
+    # threshold of DOP (Dilution of Precision) in external GPS data, above which GPS points get discarded
+    DOP_threshold = float(0.1) # STD of lat/ lon position deviation in m
+    
+    # save original columns of sum_df
     original_columns_sum_df = sum_df.columns.tolist()
 
-    # Datumsumwandlung in sum_df (Datum als Tupel: (Tag, Monat, Jahr))
+    # transform date in sum_df to tuples (format: dd.mm.yy)
     sum_df['date'] = pd.to_datetime(sum_df['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
     sum_df['date'] = sum_df['date'].apply(lambda x: (x.day, x.month, x.year) if pd.notnull(x) else None)
     
-    # In gps_gdf sicherstellen, dass das Datum als Tupel vorliegt
+    # check gps_gdf if date is tuple
     gps_gdf['date'] = gps_gdf['date'].apply(lambda x: (int(x[0]), int(x[1]), int(x[2])))
 
-    # Umwandlung der Uhrzeit in sum_df: 
+    # transform time in sum_df
     sum_df['utc_float'] = pd.to_numeric(sum_df['Utc'], errors='coerce')
     sum_df['utc_int'] = sum_df['utc_float'].apply(np.floor).astype('Int64')
-    sum_df['frac'] = sum_df['utc_float'] - sum_df['utc_int']
+    sum_df['frac'] = sum_df['utc_float'] - sum_df['utc_int'] # get decimal seconds
     
-    # Ursprüngliche Indizes speichern
+    # save original indices
     gps_gdf = gps_gdf.reset_index().rename(columns={'index': 'orig_index'})
     
-    # Sortiere gps_gdf nach Datum und Uhrzeit
+    # sort gps_gdf by date and utc
     gps_gdf = gps_gdf.sort_values(['date', 'utc']).reset_index(drop=True)
     
-    # Erzeuge nächste Werte für GPS-Daten
+    # find next point in gps data and unites them in one column in seperate columns
     gps_gdf['geom_x'] = gps_gdf['geometry'].x
     gps_gdf['geom_y'] = gps_gdf['geometry'].y
-    gps_gdf['next_geom_x'] = gps_gdf.groupby('date')['geom_x'].shift(-1)
+    gps_gdf['next_geom_x'] = gps_gdf.groupby('date')['geom_x'].shift(-1) # go up one second inside of 'date' group
     gps_gdf['next_geom_y'] = gps_gdf.groupby('date')['geom_y'].shift(-1)
     gps_gdf['next_utc'] = gps_gdf.groupby('date')['utc'].shift(-1)
     gps_gdf['next_DOP_lat'] = gps_gdf.groupby('date')['DOP (lat)'].shift(-1)
     gps_gdf['next_DOP_lon'] = gps_gdf.groupby('date')['DOP (lon)'].shift(-1)
     
-    # Merge sum_df mit gps_gdf
-    print("Mergen von GPS-Daten mit sum_df...")
+    # Merge sum_df with gps_gdf by date and utc
+    print("merge GPS and sum data")
     merged = pd.merge(sum_df, gps_gdf, left_on=['date', 'utc_int'], right_on=['date', 'utc'], how='left', suffixes=('', '_gps'))
     
-    # Fehlermeldung für fehlende Matches
+    # output error message for sonar points wihtout gps point
     no_match = merged['utc'].isna()
     if no_match.any():
-        print(f"Fehler: {no_match.sum()} Einträge haben keine exakte Uhrzeit gefunden und werden entfernt.")
+        print(f"Error: {no_match.sum()} entrys have no matching GPS data and got removed.")
 
-    # Prüfung, ob der "nächste" Punkt exakt eine Sekunde später liegt
+    # Check if GPS points to interpolate between are exactly one second apart
     correct_timing = merged['next_utc'] == merged['utc'] + 1
 
-    # Prüfung, ob sowohl der aktuelle als auch der nächste Punkt die DOP-Kriterien erfüllen
+    # Check if both points for interpolation meet DOP requirements
     valid = (
-        (merged['DOP (lat)'] <= 0.1) &
-        (merged['DOP (lon)'] <= 0.1) &
-        (merged['next_DOP_lat'] <= 0.1) &
-        (merged['next_DOP_lon'] <= 0.1) &
-        correct_timing
-    )
+        (merged['DOP (lat)'] <= DOP_threshold) &
+        (merged['DOP (lon)'] <= DOP_threshold) &
+        (merged['next_DOP_lat'] <= DOP_threshold) &
+        (merged['next_DOP_lon'] <= DOP_threshold) &
+        correct_timing)
 
-    # Berechnung der interpolierten Koordinaten
+    # Calculation of interpolated coordinates (in UTM 32N) only using valid points
+    # Interpolation by vector between 1sec apart points * decimal second of sonar-point
+    # could add skipping of decimalsecond=0 but calculation is alomst faster than checking 
     merged['Interpolated_Long'] = np.where(
-        valid,
-        merged['geom_x'] + merged['frac'] * (merged['next_geom_x'] - merged['geom_x']),
-        None
-    )
+        valid, merged['geom_x'] + merged['frac'] * (merged['next_geom_x'] - merged['geom_x']), None)
 
     merged['Interpolated_Lat'] = np.where(
-        valid,
-        merged['geom_y'] + merged['frac'] * (merged['next_geom_y'] - merged['geom_y']),
-        None
-    )
+        valid, merged['geom_y'] + merged['frac'] * (merged['next_geom_y'] - merged['geom_y']), None)
     
-    # Zähle, wie viele Einträge nicht interpoliert wurden
+    # Count and print amount of points without interpolated coordinates (not two consecutive seconds or high DOP)
     removed_points = merged['Interpolated_Long'].isna().sum()
-    print(f"Entfernte Punkte: {removed_points} (keine gültige Interpolation möglich).")
+    print(f"reomoved points: {removed_points} (no interpolation possible).")
     
-    # Entferne alle Zeilen mit NaN in den interpolierten Koordinaten
+    # Drop all rows without interpolated coordinates
     merged = merged.dropna(subset=['Interpolated_Long', 'Interpolated_Lat'])
 
-    # Speichere die ursprünglichen Spalten + interpolierte Koordinaten in sum_df
+    # only keep original and interpolation columns in sum_df 
     sum_df = merged[original_columns_sum_df + ['Interpolated_Long', 'Interpolated_Lat']].copy()
     
-    # Sammle die benutzten GPS-Punkte (basierend auf dem ursprünglichen Index) und behalte nur die Originalspalten
+    # save all gps points used for interpolation
     used_idx = merged['orig_index'].dropna().unique()
     used_gps_gdf = gps_gdf[gps_gdf['orig_index'].isin(used_idx)].copy()
 
-    # Behalte nur die ursprünglichen Spalten in used_gps_gdf
+    # only keep original clumns in gps_gdf
     used_gps_gdf = used_gps_gdf[['date', 'utc', 'lat', 'long', 'DOP (lat)', 'DOP (lon)', 'VDOP', 'geometry']]
 
     return sum_df, used_gps_gdf

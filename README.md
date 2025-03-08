@@ -96,7 +96,7 @@ get_gps_dataframe
     input: data_dir :path of data including the .txt files with external GPS data. This cant contain other .txt files than the external GPS. Only one external GPS file per day can be processed. May need to combine them amnually. Take care of keeping the BESTPOSA and GPZDA order!
                 external GPS: external GPS - PNR21 with BESTPOSA and GPZDA at 1Hz sampling rate
 
-    output: gps_geodf_projected : GeoDataFrame with date, utc, lat, long and pointgeometry for each second of the external GPS turned on
+    output: gps_geodf_projected : GeoDataFrame with date, utc, lat -in WGS84, long  -in WGS84, DOP (lat), DOP (lon), VDOP and pointgeometry - in UTM 32N - for each second of the external GPS turned on
 
     functionality: iterates through the .txt files in data_dir. 
     Iterates through each file and saves longitude and latitude in WGS84 from BESTPOSA and couples with date and utc from next following GPZDA. This assumes that first BESTPOSA comes before first GPZDA and they keep the same order. These samples are saved into a DataFrame, converted into a GeoDataFrame and projected from WGS84 to EPSG:25833.
@@ -104,12 +104,18 @@ get_gps_dataframe
 
 create_interpolated_points
     input: sum_df:dataframe including .sum data, file_id and corrected utc
-            gps_df: GeoDataFrame including external GPS samples with Utc, lat,long /x,y
+            gps_gdf: GeoDataFrame including external GPS samples with Utc, lat,long /x,y , DOP (lon), DOP (lat), VDOP, pointgeometry
 
     output: sum_df:DataFrame including .sum data, corrected utc and interpolated Long, -Lat /-X,-Y coordinates
+            used_gps_gdf: GeoDataFrame including all data of GPS points matched with sonar data points in same format as 'gps_gdf'
 
+    Message: outputs message with number of gps points not used due to DOP and consecutive seconds requirments that had valid sonar data matches.
+    variables: 
+            DOP_threshold: threshold for DOP (lat) and DOP (lon) (Dilution of Precision) above  which gps_points wont be used if one is higher.
     functionality: matches sonar samples with external GPS- Lat Long data by date and Utc.
-    External GPS has utc at the full second, sonar-GPS has utc with decimal-second. For higher precision, the approximated location at decimal second point gets interpolated. If deciaml second in corrected UTC= .0, the Long lat are used as interpolated long lat. If decimalsecond =/ 0, approximated position gets interpolated. For that, vector between consecutive samples gets created. X and Y - component of vector gets divided by decimal-second factor. Vector gets added to original Long Lat data and gets saved in Interpolated_log, - Lat.
+    External GPS has utc at the full second, sonar-GPS has utc with decimal-second. For higher precision, the approximated location at decimal second point gets interpolated. Only valid gps points are used. They both have to meet the DOP threshold for lat and lon and have to be exaclty one second apart. For interpolation, vector between valid consecutive samples gets created. X and Y - component of vector get multiplied by decimal-second part. Vector gets added to original Long Lat data and gets saved in Interpolated_log, - Lat. Creates a seperate GeoDataFrame with all rows in gps_gdf used for matching with the sonar data and the same columns as the original gps_gdf dataframe.
+    Outputs error and amount of sonar samples with missing equivalents in gps data. Possible causes: wrong date in sonar-data, GPS not turned on all the time.
+    
 
 
 
@@ -190,11 +196,10 @@ Functions of QC_closepoints:
     import numpy as np
     from collections import defaultdict
 
-
-
     general informations:
     filtered_data.csv from multibeam_processing has to be saved in output/multibeam. It has to include the filtered sonar measurments as it is used for interpoaltion. It can conatin the edge points, those wont be assessed in the quality controle. 
     Important: The Date/Time column has to contain the correct date and roughly correct timestamps. The timestamps can be wrong, as long as they are wrong for the whole survey day.
+
 
 
     filtered_data.csv is read from output/multibeam and converted to GeoDataFrame.
