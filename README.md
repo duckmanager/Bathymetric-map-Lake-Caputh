@@ -198,6 +198,68 @@ correct_waterlevel
 
 
 
+Functions of interactive_error_correction
+
+libraries: 
+from pathlib import Path
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import RectangleSelector
+from tqdm import tqdm
+
+
+    input: csv-file containing the geodataframe with the preprocessed sonar data, containing at least the colloumns:
+            file_id: Identifier for each survey run. Points with the file_id "artificial_boundary_points" will be automatically excluded.
+                        All "artifical_boundary_points" should be by default from earlier processing be at the end of the list. Else problems with the indices could arise.
+            Beam_type: Identifier for the measurement beam (VB (Vertical Beam, Beam 1-4))
+            Longitude and Latitude: UTM32N coordinates (in meters) used to compute the along-track distance.
+            Depth (m): Depth in meters
+
+    output: FILTER_CSV: A CSV file containing the indices and all data as the original csv-file from all selected points
+            df_corrected: DataFrame with original data excluding all selected points
+
+    Input Variables & Settings:
+            threshold_pixels (default: 10): The selection threshold in pixel units. A point is only toggled (selected/deselected) if the click is within this distance from it.
+            rectangle_selector_minspan (default: 5): The minimum span in pixels required for the rectangle selection to activate.
+            Interactive Selection Modes:
+                Click Selection: Clicking near a point toggles its selection. The nearest point is determined based on both x and y coordinates in display space.
+                Rectangle Selection: By dragging a rectangle over the plot, all points within that area are toggled.
+            Toggle Behavior: Clicking on an already marked point (or selecting it via rectangle) removes its selection.
+
+        functionality:
+            This tool provides a manual error-correction for sonar measurment points via an interactive Matplotlib window. One figure per survey file gets shown. Points can be selected by clicking or click and drag to select multiple points wihtin a rectangle. Selected points are marked as red. By selecting a point a again, it gets unselected. The plot shows all Beam-Types in different colors . On the X-axis this distance between following point in meters is shown. On the Y-axis the Depth in m ist shown, starting at 0m (waterlevel).
+                Initialization:
+                    Upon startup, the tool checks if a CSV file (FILTER_CSV) with previously marked faulty points exists. If found, those points are automatically removed from the dataset, after removing artifical boundary points first, and adiing them back in after.Further interactive filtering is skipped.
+                    If no FILTER_CSV exists, the tool reads the DATA_FILE, excludes any points with the file_id "artificial_boundary_points" and saves them seperately, so they wont get processed in error correction.
+                Data Segmentation & Plotting:
+                    The data is segmented by each unique survey run (file_id).
+                    For each survey run, the tool computes the cumulative along-track distance using the UTM32N coordinates (Longitude, Latitude) to serve as the x-axis.
+                    Scatter plots are generated (without connecting lines) where each Beam_type is displayed in a distinct color.
+                    The y-axis is configured so that the water surface (0 m) is at the top and the deepest measurement is extended by a 0.5 m buffer (i.e., y-limit is set from min_depth – 0.5 to 0).
+                Interactive Point Selection:
+                    Click Selection:
+                        The tool listens for click events. It converts the click position into display (pixel) coordinates and calculates the distance to each point.
+                        If the nearest point is within the threshold (e.g., 10 pixels), its selection state is toggled (red marker is added or removed).
+                    Rectangle Selection:
+                        A RectangleSelector is enabled. By dragging a rectangle over the plot, all points within that defined area are toggled (i.e., marked as faulty if unmarked, or unmarked if already selected).
+                    Finalization:
+                         After all survey runs have been reviewed (each plot is closed to proceed to the next), the tool saves the indices of all marked (faulty) points to FILTER_CSV.
+                         The faulty points are removed from the dataset, the artifical_boundary_points are added to the dataset again and the resulting filtered dataset is then ready for further processing
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 Functions of QC_closepoints:
