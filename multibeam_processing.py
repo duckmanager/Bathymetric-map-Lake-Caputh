@@ -133,9 +133,9 @@ def get_gps_dataframe(data_dir: Path):
             if line.startswith("#BESTPOSA"):
                 bestposa_raw = line.split(",")
                 if bestposa_raw[10].replace(".", "").isdigit():
-                    bestposa = (bestposa_raw[10], bestposa_raw[11], bestposa_raw[15], bestposa_raw[16], bestposa_raw[17]) # 
+                    bestposa = (bestposa_raw[10], bestposa_raw[11], bestposa_raw[12], bestposa_raw[15], bestposa_raw[16], bestposa_raw[17]) # 
                 else:
-                    bestposa = (bestposa_raw[11], bestposa_raw[12], bestposa_raw[16], bestposa_raw[17], bestposa_raw[18])
+                    bestposa = (bestposa_raw[11], bestposa_raw[12], bestposa_raw[13], bestposa_raw[16], bestposa_raw[17], bestposa_raw[18])
 
             # couple Bestposa with next GPZDA line
             elif line.startswith("$GPZDA"):
@@ -149,9 +149,10 @@ def get_gps_dataframe(data_dir: Path):
                         "utc": int(float(time)),
                         "lat": bestposa[0],  
                         "long": bestposa[1],
-                        "DOP (lat)": float(bestposa[2]),
-                        "DOP (lon)": float(bestposa[3]),
-                        "VDOP": float(bestposa[4]),
+                        "hgt": bestposa[2],
+                        "DOP (lat)": float(bestposa[3]),
+                        "DOP (lon)": float(bestposa[4]),
+                        "VDOP": float(bestposa[5]),
 
 
                     })
@@ -231,7 +232,7 @@ def create_interpolated_coords(sum_df, gps_gdf):
 
     # Calculation of interpolated coordinates (in UTM 32N) only using valid points
     # Interpolation by vector between 1sec apart points * decimal second of sonar-point
-    # could add skipping of decimalsecond=0 but calculation is alomst faster than checking 
+    # could add skipping of decimal-second=0 but this would prevent efficent vectorisation
     merged['Interpolated_Long'] = np.where(
         valid, merged['geom_x'] + merged['frac'] * (merged['next_geom_x'] - merged['geom_x']), None)
 
@@ -253,12 +254,10 @@ def create_interpolated_coords(sum_df, gps_gdf):
     used_gps_gdf = gps_gdf[gps_gdf['orig_index'].isin(used_idx)].copy()
 
     # only keep original clumns in gps_gdf
-    used_gps_gdf = used_gps_gdf[['date', 'utc', 'lat', 'long', 'DOP (lat)', 'DOP (lon)', 'VDOP', 'geometry']]
+    used_gps_gdf = used_gps_gdf[['date', 'utc', 'lat', 'long', 'hgt', 'DOP (lat)', 'DOP (lon)', 'VDOP', 'geometry']]
 
     return sum_df, used_gps_gdf
 
-
-# def filter_by_gps_quality(sum_df):
 
 
 
@@ -566,11 +565,100 @@ def adjust_depths(com_gdf: gpd.GeoDataFrame):
     return com_gdf
 
 
+def correct_waterlevel(gdf, data_dir, reference_day=""):
+    """
+    Korrigiert die Tiefenwerte (Spalte "Depth (m)") im GeoDataFrame gdf anhand der Wasserpegeldaten.
+    
+    Parameter:
+      gdf : GeoDataFrame mit Messdaten. Erforderliche Spalten sind "Date/Time", "Date" und "Depth (m)".
+            - Datum in gdf liegt im Format MM/DD/YYYY.
+      waterlevel_csv : Pfad zur CSV-Datei mit Wasserpegeln. 
+            - In der CSV liegen die Datumsangaben im Format DD/MM/YYYY.
+      reference_day : Referenztag als String im Format "MM/DD/YYYY". 
+                      Falls leer, wird der erste Messetag gewählt, der eine exakte Übereinstimmung in den Pegeldaten hat.
+    
+    Ablauf:
+      1. Fehlende Einträge in "Date" werden aus "Date/Time" extrahiert und ins Format MM/DD/YYYY konvertiert.
+      2. Alle Datumsangaben werden in datetime-Objekte umgewandelt.
+      3. Wasserpegel werden aus der CSV geladen und mittels linearer Interpolation (in Tagesschritten) für jeden Messetag ermittelt.
+      4. Bestimmung des Referenztags (exakte Übereinstimmung oder, falls nicht vorhanden, minimaler Abstand).
+      5. Berechnung der Tiefenkorrektur: korrigiert = original - (Wasserpegel_mess - Wasserpegel_ref).
+         Messwerte mit exakt 0 bleiben unverändert. Die ursprünglichen Tiefenwerte werden in "Depth_uncorrected (m)" gespeichert.
+    
+    Rückgabe:
+      GeoDataFrame mit aktualisierter "Depth (m)" und zusätzlicher Spalte "Depth_uncorrected (m)".
+    """
+    # Extract missing Date-rows from Date/Time 
+    mask = gdf["Date"].isna()
+    if mask.any():
+        gdf.loc[mask, "Date"] = pd.to_datetime(gdf.loc[mask, "Date/Time"], format="%m/%d/%Y %I:%M:%S %p").dt.strftime("%m/%d/%Y")
+
+    # transformation of all Date rows to datetime format
+    gdf["Date_dt"] = pd.to_datetime(gdf["Date"], format="%m/%d/%Y")
+    
+    # 3.load CSV with measured waterlevels (CSV-Date Format: DD/MM/YYYY) and Datetransformation
+    wl = pd.read_csv(data_dir/"waterlevel"/"waterlevel.csv", sep=";")
+    wl["date_dt"] = pd.to_datetime(wl["date"], dayfirst=True, errors="raise")
+    wl = wl.sort_values("date_dt")
+    
+    # for interpoaltion: transform dates to numerical values
+    wl_ord = wl["date_dt"].map(lambda d: d.toordinal()).values
+    wl_vals = wl["waterlevel"].values
+    meas_ord = gdf["Date_dt"].map(lambda d: d.toordinal()).values
+    
+    # Lineare Interpolation of waterlevels between measuring days - keeping exact matches
+    gdf["waterlevel"] = np.interp(meas_ord, wl_ord, wl_vals)
+    
+    # determining the reference day
+    user_input_reference = False  # flag to save if reference day from user input exists
+    if reference_day:
+        ref_dt = pd.to_datetime(reference_day, format="%m/%d/%Y")
+        user_input_reference = True
+    else:
+        # Search for first measurment-date with match in waterlevel data
+        exact = gdf[gdf["Date_dt"].isin(wl["date_dt"])]
+        if not exact.empty:
+            ref_dt = exact["Date_dt"].min()
+        else:
+            # If no exact match found, day closest to measurement date of waterlevels
+            uniq = gdf["Date_dt"].unique()
+            ref_dt = min(uniq, key=lambda d: np.min(np.abs(wl["date_dt"] - d)))
+
+    # determine waterlevel on reference day by interpolation
+    ref_wl = np.interp(ref_dt.toordinal(), wl_ord, wl_vals)
+
+    # save original depth data
+    gdf["Depth_uncorrected (m)"] = gdf["Depth (m)"]
+    
+    # correct depth data if !=0
+    # Formel:corrected = original - (level_measured - level_reference)
+    corr = gdf["Depth (m)"].where(gdf["Depth (m)"] == 0,
+                                  gdf["Depth (m)"] - (gdf["waterlevel"] - ref_wl))
+    gdf["Depth (m)"] = corr
+    
+    # remove temporary columns
+    gdf.drop(columns=["Date_dt", "waterlevel"], inplace=True)
+    
+    # make sure "Date" gets saved in MM/DD/YYYY format
+    gdf["Date"] = pd.to_datetime(gdf["Date"], format="%m/%d/%Y").dt.strftime("%m/%d/%Y")
+
+    # print the reference day and way to determine it
+    ref_day_str = ref_dt.strftime("%m/%d/%Y")
+    if user_input_reference:
+        print(f"Reference day from user input: {ref_day_str}")
+    else:
+        print(f"Reference day automatically set to: {ref_day_str}")
+
+    return gdf
+
 
 
 
 
 def filter_validation_points(com_gdf:gpd.GeoDataFrame):
+    # variable für jeden xten Punkt
+    # true flase für Verwendeung von Randpunkten
+
     # Mask for artifical edge points
     """    mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
     indices = np.arange(len(com_gdf))
@@ -632,8 +720,10 @@ def main():
     print("adjusting depths")
     adjusted_gdf = adjust_depths(gdf_combined)
     
+    gdf_waterlevel_corrected = correct_waterlevel(adjusted_gdf, data_dir)
+
     print("detecting and removing faulty depths")
-    filtered_data, faulty_data = detect_and_remove_faulty_depths(adjusted_gdf) # Reihenfolge umgekehrt
+    filtered_data, faulty_data = detect_and_remove_faulty_depths(gdf_waterlevel_corrected) # Reihenfolge umgekehrt
 
     print("Removing points for validation")
     gdf_com, gdf_validation_points= filter_validation_points(filtered_data)

@@ -96,7 +96,7 @@ get_gps_dataframe
     input: data_dir :path of data including the .txt files with external GPS data. This cant contain other .txt files than the external GPS. Only one external GPS file per day can be processed. May need to combine them amnually. Take care of keeping the BESTPOSA and GPZDA order!
                 external GPS: external GPS - PNR21 with BESTPOSA and GPZDA at 1Hz sampling rate
 
-    output: gps_geodf_projected : GeoDataFrame with date, utc, lat -in WGS84, long  -in WGS84, DOP (lat), DOP (lon), VDOP and pointgeometry - in UTM 32N - for each second of the external GPS turned on
+    output: gps_geodf_projected : GeoDataFrame with date, utc, lat -in WGS84, long  -in WGS84,hgt above mean sea level (meters), DOP (lat), DOP (lon), VDOP and pointgeometry - in UTM 32N - for each second of the external GPS turned on
 
     functionality: iterates through the .txt files in data_dir. 
     Iterates through each file and saves longitude and latitude in WGS84 from BESTPOSA and couples with date and utc from next following GPZDA. This assumes that first BESTPOSA comes before first GPZDA and they keep the same order. These samples are saved into a DataFrame, converted into a GeoDataFrame and projected from WGS84 to EPSG:25833.
@@ -104,14 +104,14 @@ get_gps_dataframe
 
 create_interpolated_points
     input: sum_df:dataframe including .sum data, file_id and corrected utc
-            gps_gdf: GeoDataFrame including external GPS samples with Utc, lat,long /x,y , DOP (lon), DOP (lat), VDOP, pointgeometry
+            gps_gdf: GeoDataFrame including external GPS samples with Utc, lat,long /x,y, hgt , DOP (lon), DOP (lat), VDOP, pointgeometry
 
     output: sum_df:DataFrame including .sum data, corrected utc and interpolated Long, -Lat /-X,-Y coordinates
             used_gps_gdf: GeoDataFrame including all data of GPS points matched with sonar data points in same format as 'gps_gdf'
 
-    Message: outputs message with number of gps points not used due to DOP and consecutive seconds requirments that had valid sonar data matches.
-    variables: 
-            DOP_threshold: threshold for DOP (lat) and DOP (lon) (Dilution of Precision) above  which gps_points wont be used if one is higher.
+    Message: outputs message with number of gps points not used due to DOP and consecutive seconds requirments that had valid sonar data matches.  (default is 0.1 (m))
+    
+    variables:  DOP_threshold: threshold for DOP (lat) and DOP (lon) (Dilution of Precision) above  which gps_points wont be used if one is higher.
     functionality: matches sonar samples with external GPS- Lat Long data by date and Utc.
     External GPS has utc at the full second, sonar-GPS has utc with decimal-second. For higher precision, the approximated location at decimal second point gets interpolated. Only valid gps points are used. They both have to meet the DOP threshold for lat and lon and have to be exaclty one second apart. For interpolation, vector between valid consecutive samples gets created. X and Y - component of vector get multiplied by decimal-second part. Vector gets added to original Long Lat data and gets saved in Interpolated_log, - Lat. Creates a seperate GeoDataFrame with all rows in gps_gdf used for matching with the sonar data and the same columns as the original gps_gdf dataframe.
     Outputs error and amount of sonar samples with missing equivalents in gps data. Possible causes: wrong date in sonar-data, GPS not turned on all the time.
@@ -138,9 +138,9 @@ generate_boundary_points
 
     output: boundary_gdf: GeoDataFrame (epsg:25833): [geometry]- point geometry of each point, [Longitude], [Latitude] - x/y of each point in EPSG:25833, [Depth (m)] - Depth of each point, [file_id] = "artificial_boundary_points", [Date] - day of point measurement
 
-    input variables: spacing: distance between each edge point, in m
-                    interpoaltion_distance: distance between measured depth of edge point, within they get connected, in m
-                    extrapolation_distance: distance to extrapolate measured depth to the side without measured point within interpolation_distance, in m
+    input variables: spacing: distance between each edge point, in m (default is 1)
+                    interpoaltion_distance: distance between measured depth of edge point, within they get connected, in m (default is 150)
+                    extrapolation_distance: distance to extrapolate measured depth to the side without measured point within interpolation_distance, in m (default is 15)
 
     functionality: creates artifical edge points for enhanced interpoaltion precision at the edges. Only interpolates near measured points.
     Creates points with "spacing" distance between on the outline of -shp file of the water body. Uses cKDTress for neighor identification. Connects each measured Depth point with the closest edge point. For measured points within "interpoaltion_distance" to each other, each point in between gets a depth assigned. The Depth gets linearly interpolated by the difference in depth between the measured points and the number of artifical edge points between. If no meassured point is within "interpolation_distance", edge points ~ within "extrapolation_distance" get assigend the same depth as last measured. All edge points without depth assigned get discraded.
@@ -168,15 +168,33 @@ detect_and_remove_faulty_depths
     output: filtered_gdf: GeoDataFrame: all points after error filtering, columns unchanged
             removed_gdf: GeoDataFrame containing all faulty filtered points, columns unchanged
 
-    input variables: max_distance (int) - radius of mean calculation
-                    threshold (float) - depth difference above which points get discarded
+    input variables: max_distance (int) - radius of mean calculation (default is )
+                    threshold (float) - depth difference above which points get discarded (default is )
 
     functionality: removes faulty points by comparing to averaged depth of sorrounding points.
     Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. Uses cKDTress for neighor identification. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artifical_boundary_point. Artifical edge points get recognised for average depth but wont be discarded as faulty points.
 
+filter_validation_points
 
 
 
+
+correct_waterlevel
+    input: gdf: GeoDataFrame containing sonar measurement data, including depth and spatial coordinates.
+            data_dir: Path to data-folder including one "waterlevel" folder with a CSV file "waterlevel.csv" containing mesaured water levels. "waterlevel.scv" contains "waterlevel" in m and "date" in (DD/MM/YYYY-format)column  The earliest measurement must be of same day or earlier than the first sonar measurment. The latest measuremnt must be at the same day or later than latest sonar-measurement.
+            reference_day (optional): Reference day for depth correction (MM/DD/YYYY format), if empty, reference day gets determined automatically
+
+    output: gdf_corrected: GeoDataFrame with updated depth values:
+                                    [Depth (m)]: Corrected depth values, adjusted for water level fluctuations.
+                                    [Depth_uncorrected (m)]: Original depth values before correction.
+                                        Other columns remain unchanged.
+
+            message: "Reference day from user input: MM/DD/YYYY" - if user gave reference date
+                       or
+                        "Reference day automatically set to: MM/DD/YYYY" - if reference day gt automatically determined
+                        with MM/DD/YYY being the reference day used for the calculations.
+
+    functionality: The function corrects measured depth values (Depth (m)) based on water level fluctuations recorded in waterlevel_csv. Uses "Date" from, that gets completed from date/Time if it has missing values. Date gets srted by unique values. Matches are searched with date in waterlevel. Converts date in numerical values and uses np.interp() to linearly interpolate missing water levels for measurement days. Reference day gets determined, if not given by user input, by Choose the first measurement day with an exact match in the water level dataset. If no exact match exists, select the closest date based on proximity to available water level records.Calculate the depth correction: Depth (m) = Depth (m) - (waterlevel_measurement - waterlevel_reference), except if Depth (m) == 0  (should only happen at artifical edge points). Store corrected data in Depth (m) and the original uncorrected data in "Depth_uncorrected (m)".
 
 
 
@@ -209,10 +227,10 @@ Functions of QC_closepoints:
     output: depth_diff_df: pandas.DataFrame including one column for each date_combination including itself with itself and depth differences measured in these date-combinations within the specfied ranges. Column formatting [YYYY-MM-DD-YYYY-MM-DD].
             used_points_gdf: GeoDataFrame including all points compared in 'calculate_depth_differences_intersections'. Formatting is the same as filtered_data_gdf.
 
-    variables: max_distance: max distance between poits for them to be compaired as neighbor points
-                min_time_diff: min time difference between 'Date/Time' column of two points, for them to be compaired as neighbor points.
+    variables: max_distance: max distance between poits for them to be compaired as neighbor points (default is )
+                min_time_diff: min time difference between 'Date/Time' column of two points, for them to be compaired as neighbor points. (default is )
     
-    functionlity: Determines all neighbor points in the requirments, so only survey crossings get recognized, not points in direct sequence. Neighbor points are determined using a cKDTree algorithm. The Depth differences get grouped by the combination of dates, they were measured at. each Depth combination only gets caluclated once. This is ensured as only the neighbor of a single point get used for difference calculations, that were measured to an earlier time. This prevents calculation of a-b and b-a. The depth difference gets calculated by earlier point - later point.
+    functionlity: Determines all neighbor points in the requirments, so only survey crossings get recognized, not points in direct sequence. Neighbor points are determined using a cKDTree algorithm. The Depth differences get grouped by the combination of dates, they were measured at. each Depth combination only gets caluclated once. This is ensured as only the neighbor of a single point get used for difference calculations, that were measured to an earlier time. This prevents calculation of a-b and b-a the depth difference gets calculated by earlier point - later point.
 
     calculate_depth_differences_close_points
     input: same as 'calculate_depth_differences_intersections' (transformed_gdf)
@@ -220,7 +238,7 @@ Functions of QC_closepoints:
 
     variables: max_distance: max distance between poits for them to be compaired as neighbor points
 
-    functionality: The functionality is the same as 'max distance between poits for them to be compaired as neighbor points'. But no min time difference is defined, so all points within the distance get calculated resulting in comparison of consecutive points of the same survey if they are within the distance requirements. The difference groups of differnt days are the same as in 'calculate_depth_differences_intersections', if max_distance ist the same.
+    functionality: The functionality is the same as 'max distance between poits for them to be compaired as neighbor points'. But no time difference is defined, so all points within the distance get calculated resulting in comparison of consecutive points of the same survey as well as the comparison of crossing points if they are within the distance requirements. The difference groups of differnt days are the same as in 'calculate_depth_differences_intersections', if max_distance ist the same.
 
 
 compute_statistics_intersections
