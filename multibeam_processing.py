@@ -373,17 +373,20 @@ def detect_and_remove_faulty_depth(geodf_projected: gpd.GeoDataFrame, window_siz
 
 
 
-# Adding different error detection approach
-# looking for neighbors in 5m? radius, taking average of them, without middle points. If middle point is more than ?0.5m? off this mean, it gets deleted and safed to faulty points.
-    # Sicherstellen, dass es ein GeoDataFrame ist
+# automatic error detection approach
+# looking for neighbors in 5m? radius, taking average of them without middle points. If middle point is more than ?0.5m? off this mean, it gets deleted and safed to faulty points. The original index is kept for automatic processing
+
 def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_distance: int = 5, threshold: float = 0.5):
     if not isinstance(geodf_projected, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf must be gdf!")
     
+    # save original index in column
+    geodf_projected = geodf_projected.copy()
+    geodf_projected['orig_index'] = geodf_projected.index
+    
     # Extract relevant data as numpy array
     coords = np.vstack([geodf_projected.geometry.x, geodf_projected.geometry.y]).T
     depths = geodf_projected['Depth (m)'].values
-
     
     # create cKDTree for efficient neighbor search
     tree = cKDTree(coords)
@@ -413,7 +416,7 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_dista
     valid_indices.extend(boundary_indices)
 
     # Create new gdf with filtered and faulty points
-    filtered_gdf = geodf_projected.iloc[valid_indices].copy()
+    filtered_gdf = (geodf_projected.iloc[valid_indices].copy()).drop(columns='orig_index')
     removed_gdf = geodf_projected.iloc[removed_indices].copy()
 
     return filtered_gdf, removed_gdf
@@ -488,15 +491,6 @@ def generate_boundary_points(data_dir):
             depth_step = depth_diff / (num_points - 1) if num_points > 1 else 0
             for i, idx in enumerate(range_idx):
                 boundary_gdf.at[idx, "depth"] = row["Depth (m)"] + i * depth_step
-
-    # Extrapolate same depth as measured for 15m if no measurment point is within 150m
-    """    for _, row in edge_gdf.iterrows():
-        if pd.isna(row["next_depth"]) or row["distance_to_next"] >= 150:
-            start_idx = row["nearest_boundary_idx"]
-            for i in range(1, int(15 / spacing) + 1):
-                if start_idx + i < len(boundary_gdf): #not necessary?
-                    boundary_gdf.at[start_idx + i, "depth"] = row["Depth (m)"]"""
-
 
     # Berechne den Abstand zum vorherigen Messpunkt (cyclic)
     edge_gdf["prev_point"] = edge_gdf["geometry"].shift(1)
@@ -659,17 +653,6 @@ def filter_validation_points(com_gdf:gpd.GeoDataFrame):
     # variable für jeden xten Punkt
     # true flase für Verwendeung von Randpunkten
 
-    # Mask for artifical edge points
-    """    mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
-    indices = np.arange(len(com_gdf))
-    mask_filter = ~mask_boundary & (indices % 10 == 0)"""
-    """    # Mask for filtering  - every tenth point, thats not an artifical edge point
-    indices = np.arange(len(com_gdf))
-    mask_filter = (indices % 2 == 0)
-
-    # Seperate into two Geodataframes
-    gdf_validation_points = com_gdf[mask_filter].copy()
-    gdf_interpol_points = com_gdf[~mask_filter].copy()"""
 
      # calculate without boundary points
     mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"
@@ -707,10 +690,7 @@ def main():
 
     print("create multibeam points")
     multipoint_gdf = create_multibeam_points(interpolated_sum)
-    # print("merging GPS and sum data")
-    # merged_dataframe = merge_sum_gps(sum_dataframe, gps_geodf_projected)
-    # print("converting to geodataframe and projecting to UTM 33N")
-    # geodataframe_sum = convert_to_utm_geodf(merged_dataframe)
+
     print("creating lake outlines")
     boundary_gdf = generate_boundary_points(data_dir)
     
@@ -732,8 +712,9 @@ def main():
     print("saving output")
     output_path = Path("output/multibeam")
     filtered_data.to_csv(output_path / "filtered_data.csv", index=False)
+    gdf_waterlevel_corrected.to_csv(output_path / "unfiltered_data.csv", index=False)
     filtered_data.to_csv(output_path / "m_newutc_filtered_newedge.csv", index=False)
-    faulty_data.to_csv(output_path / "m_error_newutc_newedge.csv", index=False)
+    faulty_data.to_csv(output_path/ "interactive_error" / "interactive_error_points.csv", index=False)
 
     gdf_com.to_csv(output_path / "multibeam_filtered_for_validation.csv", index=False)
     gdf_validation_points.to_csv(output_path / "multibeam_validation_points.csv", index=False)
