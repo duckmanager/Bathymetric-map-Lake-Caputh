@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 # user settings: True => manual check, with or without existing faulty points; False => manual check only happends if no file with faulty points exists 
 # can be used if manual correction already exists and should not be changed
-manual_override = True  ####### User changeable: True / False
+manual_overwrite = True  ####### User changeable: True / False
 
 DATA_FILE = "output/multibeam/unfiltered_data.csv"              # file with all data
 FILTER_CSV = "output/multibeam/interactive_error/interactive_error_points.csv"  # csv with faulty points
@@ -20,7 +20,7 @@ if 'orig_index' not in df.columns:
     df['orig_index'] = df.index
 
 if Path(FILTER_CSV).exists():
-    if not manual_override: # if manual overrie = False -> use faulty indices list for filtering
+    if not manual_overwrite: # if manual overwrite = False -> use faulty indices list for filtering
         removed_points_df = pd.read_csv(FILTER_CSV)
         bad = removed_points_df['orig_index'].tolist()  # get original indices of faulty points
         boundary_points = df[df['file_id'] == "artificial_boundary_points"] # dont filter edge points
@@ -28,7 +28,7 @@ if Path(FILTER_CSV).exists():
         print(f"({len(bad)}) marked error points got loaded and removed from data")
         exit()
     else:
-        # manual override = True -> manual error correction is started with or without existing faulty points
+        # manual overwrite = True -> manual error correction is started with or without existing faulty points
         removed_points_df = pd.read_csv(FILTER_CSV)
         loaded_bad = removed_points_df['orig_index'].tolist()
         print(f"({len(loaded_bad)}) marked error points loaded for manual check")

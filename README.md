@@ -41,6 +41,17 @@ Functions of multibeam_processing
     general informations:
     Combine sonar and GPS data, optimize data quality and add seperatly measured edge points to create a dataset usable in GIS-interpolations.
 
+    basic starter guide for Riversurveyor M9 and ProNivo PNR21
+    Put ASCII and matlab export (has to contain correct date) of each survey in /data
+    Put the .txt of ProNivo PNR21 for each measurment day in /data
+
+    - waterbody.shp in data/shp_files
+    - edge_depth_measurements.csv with edge measuremnts (in m) in data/outline
+
+    - waterlevel.csv with ["date"],["waterlevel"] - (youngest waterlevel cant be older than earliest survey, oldest waterlevel cant be younger than last survey), in data/waterlevel
+    - variables for automatic filtering
+
+
 required packages:
 - pathlib
 - pandas
@@ -165,13 +176,19 @@ adjust_depths
 
 detect_and_remove_faulty_depths
     input: geodf_projected, GeoDataFrame - output of adjust_depths or create_multibeam_points for correction without edge points
-    output: filtered_gdf: GeoDataFrame: all points after error filtering, columns unchanged
+    output: if automatic_detection = True
+            filtered_gdf: GeoDataFrame: all points after error filtering, columns unchanged
             removed_gdf: GeoDataFrame containing all faulty filtered points, original columns + column with the orginal index of each point
 
+            if automatic detection = False
+            geodf_projected: unchanged gdf
+            empty gdf
+    user variable: automatic_detection= True / False -> determines if function will run (True) or return input and empty gdf
     input variables: max_distance (int) - radius of mean calculation (default is )
                     threshold (float) - depth difference above which points get discarded (default is )
 
     functionality: removes faulty points by comparing to averaged depth of sorrounding points.
+    Checks if automatic_detection =False - if so, the rest will be skipped. geodf_projected will be skipped and removed_gdf an empty gdf
     Saves original index in "orig_index". Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. Uses cKDTress for neighor identification. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artifical_boundary_point. Artifical edge points get recognised for average depth but wont be discarded as faulty points.
 
 filter_validation_points
@@ -220,9 +237,10 @@ from tqdm import tqdm
     output: FILTER_CSV: A CSV file containing the indices and all data as the original csv-file from all selected points
             df_corrected: DataFrame with original data excluding all selected points
 
-    user variable: manual_override 
+    user variable: manual_overwrite
                 = True -> the manual correction plots will show, no matter if a csv (interactive_error_points.csv in output/multibeam/interactive_error) of faulty points already exists or not
-                = False -> manual correction plots only show if no fulty point list exists yet, otherwise just filters using the csv
+                = False -> if "interactive_error_points.csv" exists -> filtering will be applied - no plot shown
+                            if "interactive_error_points.csv" doesnt exist -> plots will be shown
 
     Input Variables & Settings:
             threshold_pixels (default: 10): The selection threshold in pixel units. A point is only toggled (selected/deselected) if the click is within this distance from it.
@@ -235,9 +253,9 @@ from tqdm import tqdm
         functionality:
             This tool provides a manual error-correction for sonar measurment points via an interactive Matplotlib window. One figure per survey file gets shown. Points can be selected by clicking or click and drag to select multiple points wihtin a rectangle. Selected points are marked as red. By selecting a point a again, it gets unselected. The plot shows all Beam-Types in different colors . On the X-axis this distance between following point in meters is shown. On the Y-axis the Depth in m ist shown, starting at 0m (waterlevel).
                 Initialization:
-                    Upon startup, the tool checks if manual_override=True/False.If a CSV file (interactive_error_correction.csv) with previously marked faulty points exists and manual_override=False, those points are automatically removed from the dataset, after removing artifical boundary points first, and adiing them back in after.Further interactive filtering is skipped.
+                    Upon startup, the tool checks if manual_overwrite=True/False.If a CSV file (interactive_error_correction.csv) with previously marked faulty points exists and manual_overwrite=False, those points are automatically removed from the dataset, after removing artifical boundary points first, and adiing them back in after.Further interactive filtering is skipped.
                     If no FILTER_CSV exists, the tool reads the DATA_FILE, excludes any points with the file_id "artificial_boundary_points" and saves them seperately, so they wont get processed in error correction.
-                    If manual_override =True the interactive error correction starts with or without existing "interactive_error_points.csv". If it exists the faulty points are moved to loaded_bad and shown as selcted in the plots for further editing.
+                    If manual_overwrite =True the interactive error correction starts with or without existing "interactive_error_points.csv". If it exists the faulty points are moved to loaded_bad and shown as selcted in the plots for further editing.
                 Data Segmentation & Plotting:
                     The data is segmented by each unique survey run (file_id).
                     For each survey run, the tool computes the cumulative along-track distance using the UTM32N coordinates (Longitude, Latitude) to serve as the x-axis.

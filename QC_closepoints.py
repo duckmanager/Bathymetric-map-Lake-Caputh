@@ -387,7 +387,7 @@ def main():
     print("saving data")
 
     data_output_dir = Path("output/multibeam/QC")
-    used_points_intersections_gdf.to_csv(data_output_dir/"QC_used_points.csv", index=False)
+    used_points_intersections_gdf.to_csv(data_output_dir/"QC_closepointvalidation_used_points.csv", index=False)
 
     input("done!")
 
