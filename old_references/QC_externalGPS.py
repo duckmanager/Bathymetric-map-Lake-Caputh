@@ -20,8 +20,6 @@ def plot_gps_boxplots(used_gps_points):
 
 
 
-
-
     plt.figure(figsize=(10, 6))
     
     # Boxplots erstellen

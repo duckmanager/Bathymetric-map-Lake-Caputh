@@ -5,19 +5,20 @@ import argparse
 from pathlib import Path
 import logging
 
-from multibeam_processing import (
-    create_dataframe,
-    assign_data_to_dataframe,
-    get_gps_dataframe,
-    create_interpolated_coords,
-    create_multibeam_points,
-    generate_boundary_points,
-    combine_multibeam_edge,
-    adjust_depths,
-    correct_waterlevel,
-    detect_and_remove_faulty_depths,
-    filter_validation_points,
-)
+from load_data import (create_dataframe,
+                    assign_data_to_dataframe,
+                    get_gps_dataframe,
+                    create_interpolated_coords)
+from multibeam_location import create_multibeam_points
+from edge_points import (generate_boundary_points,
+                    combine_multibeam_edge)
+from survey_adjustments import (adjust_depths,
+                    correct_waterlevel)
+from automatic_correction import detect_and_remove_faulty_depths
+from manual_correction import (interactive_error_correction,
+                    filter_validation_points)
+
+
 
 
 def get_args():
@@ -49,18 +50,29 @@ def get_args():
         "-sdd",
         default=Path().joinpath("data", "sonar_data"),
         type=Path,
-        help="this gotta be a path to a file that exists",
+        help="path to folder with sonar data",
+    )
+
+    arg_par.add_argument(
+        "--gps_data_dir",
+        "-gpsd",
+        default=Path().joinpath("data", "gps_data"),
+        type=Path,
+        help="path to folder with the external gps data",
     )
     # TODO: add ->
     # flag for automatic correction
     # automatic correction radius
     # automatic correction threshold
+    # optional reference date
     # flag for manual correction
     # path to water level correction file
     # path to waterbody shape file
     # path to outline measurements file
     # path to dir with sonar data
     # path to dir with gps data
+    # path to store faulty_points
+    # sample rate - in validation points
 
     return arg_par.parse_args()
 
@@ -76,6 +88,7 @@ if __name__ == "__main__":
     # logging.info(f"path: {args.some_file} with type {type(args.some_file)}. exists: {args.some_file.is_file()}")
 
     data_dir = Path("data")
+    faulty_points_dir= Path("output/faulty_points")
     logging.info("starting to create empty dataframe")
     sum_dataframe_empty, sum_header = create_dataframe(args.sonar_data_dir)
     logging.info("assigning data to dataframe and correcting sonar-GPS times")
@@ -83,7 +96,7 @@ if __name__ == "__main__":
         args.sonar_data_dir, sum_dataframe_empty, sum_header
     )
     logging.info("starting get_gps")
-    gps_geodf_projected = get_gps_dataframe(data_dir)  # including interpolation
+    gps_geodf_projected = get_gps_dataframe(args.gps_data_dir)  # including interpolation
     logging.info("creating interpolated points")
     interpolated_sum, used_gps_gdf = create_interpolated_coords(
         sum_dataframe, gps_geodf_projected
@@ -106,9 +119,22 @@ if __name__ == "__main__":
     logging.info("detecting and removing faulty depths")
     filtered_data, faulty_data = detect_and_remove_faulty_depths(
         gdf_waterlevel_corrected,
+        faulty_points_dir,
         max_distance=args.filtering_max_distance,
-        automatic_detection=args.automatic_detection,
+        automatic_detection=args.automatic_detection
     )  # Reihenfolge umgekehrt
+
+    logging.info("detecting and removing faulty depths")
+    auto_filtered_data, faulty_data = detect_and_remove_faulty_depths(
+        gdf_waterlevel_corrected,
+        faulty_points_dir,
+        max_distance=args.filtering_max_distance,
+        automatic_detection=args.automatic_detection
+    )     
+
+    logging.info("starting manual error detection")
+    filtered_data = interactive_error_correction(faulty_points_dir, gdf_waterlevel_corrected, manual_overwrite= True )# change to argparse.
+
 
     logging.info("Removing points for validation")
     gdf_com, gdf_validation_points = filter_validation_points(filtered_data)

@@ -12,40 +12,43 @@ from collections import defaultdict
 
 
 
-
-# import multibeam geodataframe after removing faulty points
-"""from multibeam_processing import main
-filtered_data =main()"""
-
-
-
-"""def load_transformed_gdf(file_path):
-    
-    df = pd.read_csv(file_path) 
-    # Konvertiere zu GeoDataFrame
-    if 'geometry' in df.columns:
-        df['geometry'] = gpd.GeoSeries.from_wkt(df['geometry'])  # Falls gespeichert als WKT-String 
-    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:25833")  # Setze das richtige CRS
-    return gdf"""
-
-
-
-def calculate_depth_differences_intersections(transformed_gdf):
+def calculate_depth_differences_intersections(transformed_gdf, 
+    max_distance: str = 0.2,  # meters
+    min_time_diff = pd.Timedelta(minutes=5)):  # min time difference between points):
     """
-    Berechnet die Tiefenunterschiede an Punkten, die sich an Kreuzungspunkten befinden,
-    basierend auf einem Abstand von weniger als 0,5m und einer Zeitdifferenz von mehr als 5 Minuten.
-    Die Differenzen werden nach Tagen gruppiert, und es wird sichergestellt, dass immer der spätere
-    Wert minus den früheren Wert berechnet wird. Punkte mit file_id == "artificial_boundary_points"
-    werden ignoriert.
+    Calculate depth differences between spatially close and temporally distinct points.
+
+    Identifies all neighboring sonar measurement points within a given spatial range, filters them by a minimum time difference, and calculates depth differences between valid survey day pairs. 
+    Designed to assess consistency across intersecting or overlapping survey tracks.
+    All results are grouped by the corresponding date pairs.
+
+    args:
+        transformed_gdf: GeoDataFrame - filtered sonar dataset including geometry, depth, and internal 'Date/Time' field (EPSG:25833)
+        max_distance: str - max distance between points (in meters) to be compared
+        min_time_diff: pandas.Timedelat - min time difference between points (in min) for them to be compared
+
+    returns:
+        depth_diff_df: DataFrame - depth differences grouped by survey date combinations (columns named as 'YYYY-MM-DD-YYYY-MM-DD')
+        used_points_gdf: GeoDataFrame - all points used in the pairwise comparisons
+
+    functionality:
+        The function compares depth values between points that lie within a specified spatial distance (`max_distance`, default: 0.2 m) and have a minimum time difference (`min_time_diff`, default: 5 minutes).
+        This ensures only crossings or overlaps between independent survey passes are considered, avoiding consecutive point comparisons from the same track.
+        
+        A cKDTree is used for efficient neighbor search. For each point, only neighbors recorded at a later time are used to avoid double-counting (i.e., a-b and b-a). The depth difference is calculated as:  
+        **earlier depth − later depth**.  
+        All results are grouped by the date pair on which the two compared points were recorded (e.g., '2025-01-12–2025-01-13') and returned as a wide-format DataFrame.
+
+        Artificial boundary points (`file_id == "artificial_boundary_points"`) are excluded entirely from the comparison.
+
+        This method provides a basis for evaluating survey consistency and detecting potential vertical offsets between repeated measurements in overlapping areas.
     """
     
     # Check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
-    # maximal distance and maximal time difference for neighbors
-    max_distance = 0.2  # meters
-    min_time_diff = pd.Timedelta(minutes=5)  # min time difference between points
+
 
     # remove all "artifical edge points"
     transformed_gdf = transformed_gdf[transformed_gdf['file_id'] != "artificial_boundary_points"].copy()
@@ -129,62 +132,41 @@ def calculate_depth_differences_intersections(transformed_gdf):
     used_points_gdf = transformed_gdf.loc[list(used_indices)].copy()
 
     return depth_diff_df, used_points_gdf
-    
-    
-    """
-    old version:
-    for idx, neighbors in tqdm(enumerate(indices), total=len(indices), desc="calculating depth differences"):
-        point_time = datetimes[idx]
-        point_date = dates[idx]
-        point_depth = depths[idx]
-        
-        valid_matches = []
-        
-        for neighbor_idx in neighbors:
-            if neighbor_idx == idx:
-                continue  # skip itself
-            
-            # checks if time difference specification is met
-            match_time = datetimes[neighbor_idx]
-            match_date = dates[neighbor_idx]
-            match_depth = depths[neighbor_idx]
-            
-            time_diff = abs(point_time - match_time)
-            
-            if time_diff > min_time_diff:
-                valid_matches.append((match_date, abs(point_depth - match_depth)))
-                # saves indices of used points
-                used_indices.add(idx)
-                used_indices.add(neighbor_idx)
-        
-        # fill dct with calculated values
-        for date, depth_diff in valid_matches:
-            date_pair = tuple(sorted((point_date, date)))
-            depth_diff_dict[date_pair].append(depth_diff)
-    
-    # Erstelle ein DataFrame aus dem Dictionary, wobei jede Spalte nur so viele Einträge hat, wie berechnet wurden
-    depth_diff_df = pd.DataFrame(dict([(f"{k[0]}-{k[1]}", pd.Series(v)) for k, v in depth_diff_dict.items()]))
-    
-    # Erstelle ein GeoDataFrame mit nur den verwendeten Punkten
-    used_points_gdf = transformed_gdf.loc[list(used_indices)].copy()
-    
-    return depth_diff_df, used_points_gdf
-"""
 
-def calculate_depth_differences_close_points(transformed_gdf):
+
+def calculate_depth_differences_close_points(transformed_gdf, max_distance:str=0.2):
     """
-    Berechnet die Tiefenunterschiede für Punkte, die sich in einem Abstand von weniger als 0,2 m befinden.
-    Die Differenzen werden nach Tagen gruppiert, und es wird sichergestellt, dass immer der spätere
-    Wert minus den früheren Wert berechnet wird. Punkte mit file_id == "artificial_boundary_points" werden ignoriert.
-    Gibt zusätzlich ein GeoDataFrame mit den verwendeten Punkten zurück.
+    Calculate depth differences between spatially close points, regardless of time difference.
+
+    Identifies neighboring sonar measurement points within a specified spatial distance and computes pairwise depth differences. Unlike intersection-only methods, this includes both consecutive points from the same survey and overlapping points from different days. 
+    All results are grouped by the corresponding date pairs.
+
+    args:
+        transformed_gdf: GeoDataFrame - sonar depth data containing coordinates, timestamps, and [Depth (m)] column
+        max_distance: float (default: 0.2) - maximum spatial distance (in meters) between two points to be considered neighbors
+
+    returns:
+        depth_diff_df: DataFrame - depth differences grouped by date combinations, one column per date pair in format 'YYYY-MM-DD–YYYY-MM-DD'
+        used_points_gdf: GeoDataFrame - all points that were used in the pairwise depth comparisons
+
+    functionality:
+        This function analyzes local consistency within sonar data by calculating depth differences between points located within `max_distance` of one another.
+        It includes comparisons across different survey dates as well as within the same survey track. Unlike `calculate_depth_differences_intersections`, there is no minimum time difference requirement.
+
+        To avoid double-counting, only point pairs where one point was measured later than the other are considered (e.g., a–b, but not b–a). The depth difference is always calculated as:  
+        **earlier depth − later depth**.
+
+        Artificial boundary points (`file_id == "artificial_boundary_points"`) are excluded from both the calculations and the output.
+        
+        The function uses a `cKDTree` for efficient spatial neighbor searches and returns a table of grouped depth differences and a GeoDataFrame of all used points. 
+        This approach is particularly useful for evaluating local noise or inconsistencies within and between survey passes.
     """
+
     
     # Check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
 
-    # max distance betweeen points
-    max_distance = 0.2  # meters
 
     # Entferne alle "artificial_boundary_points"
     transformed_gdf = transformed_gdf[transformed_gdf['file_id'] != "artificial_boundary_points"].copy()
@@ -267,16 +249,24 @@ def calculate_depth_differences_close_points(transformed_gdf):
 
 # mean and std of the depth differences
 
-
 ###############################################
 ################################ change date format
 
 def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
 
     """
-    Berechnet den Durchschnitt und die Standardabweichung jeder Spalte im DataFrame
-    und gibt das Ergebnis als neuen DataFrame zurück.
+    Compute summary statistics and visualize depth differences from intersecting survey lines.
+
+    Calculates the mean and standard deviation of depth differences for each date pair in the input DataFrame and displays the distributions using a boxplot, including point counts above each box.
+
+    args:
+        depth_diff_df: DataFrame - depth differences grouped by date combinations, typically from calculate_depth_differences_intersections
+
+    returns:
+        stats_df: DataFrame - statistical summary with 'Mean' and 'StdDev' for each date combination
+        box: matplotlib object - the generated boxplot object (for optional further use or saving)
     """
+
     stats_df = pd.DataFrame({
         'Mean': depth_diff_df.mean(),
         'StdDev': depth_diff_df.std()
@@ -321,10 +311,20 @@ def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
 
 
 def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
+   
     """
-    Berechnet den Durchschnitt und die Standardabweichung jeder Spalte im DataFrame
-    und gibt das Ergebnis als neuen DataFrame zurück.
+    Compute summary statistics and visualize depth differences between spatially close points.
+
+    Calculates the mean and standard deviation of depth differences for each date pair in the input DataFrame and visualizes the distributions using a boxplot, including count labels for the number of point pairs per group.
+
+    args:
+        depth_diff_df: DataFrame - depth differences grouped by date combinations, typically from calculate_depth_differences_close_points
+
+    returns:
+        stats_df: DataFrame - statistical summary with 'Mean' and 'StdDev' for each date combination
+        box: matplotlib object - the generated boxplot object (for optional reuse or export)
     """
+
     stats_df = pd.DataFrame({
         'Mean': depth_diff_df.mean(),
         'StdDev': depth_diff_df.std()

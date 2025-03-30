@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 """
-This script processes temperature-depth profiles from CSV files in the data folder,
+This script processes temperature-depth profiles from temperature-depth csv,
 interpolates the data at a fixed depth resolution, and plots all
 individual profiles along with their mean temperature curve.
 

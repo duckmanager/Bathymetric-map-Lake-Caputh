@@ -480,7 +480,7 @@ def detect_and_remove_faulty_depths(
         print("Skipping automatic detection of faulty depths")
         return geodf_projected, gpd.GeoDataFrame(
             columns=geodf_projected.columns
-        )  # empty GeoDataFrame
+        )
 
     # save original index in column
     geodf_projected = geodf_projected.copy()
@@ -556,7 +556,7 @@ def generate_boundary_points(data_dir):
 
     # load measured points and transform into gdf
     edge_points = pd.read_csv(
-        data_dir / "outline" / "Capsee_outlinepoints_final.csv"
+        data_dir / "outline" / "measured_edgepoints.csv" # oder "measured_edgepoints.csv"
     )  # change name and N E - change in readme
     edge_gdf = gpd.GeoDataFrame(
         edge_points,
@@ -570,7 +570,7 @@ def generate_boundary_points(data_dir):
         common_date = unique_dates[0]  # save the date
     else:
         print(
-            "Error: All edge point measuremtns must be from the same date to allow for later correction of water level fluctuations. Please fix manually"
+            "Error: All edge point measurements must be from the same date to allow for later correction of water level fluctuations. Please fix manually"
         )
         print("Found dates:", unique_dates)
 
@@ -671,7 +671,7 @@ def generate_boundary_points(data_dir):
     boundary_gdf.drop(columns=["depth"], inplace=True)
     boundary_gdf["file_id"] = "artificial_boundary_points"
     boundary_gdf["Date"] = (
-        common_date  # if fails, the measumrent points used different dates
+        common_date  # if fails, the measumrent points used multiple different dates
     )
 
     return boundary_gdf

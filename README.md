@@ -173,6 +173,47 @@ adjust_depths
 
     functionality: changes measured depth distance into neagtiv depth values
 
+filter_validation_points
+    input: com_gdf, Geodataframe - containing the full set of bathymetric data points
+            sample_rate, int - rate at which every point gets assigned to validation dataset
+
+    output: gdf_interpol_points, Geodataframe: Contains all remaining sonar points used for interpolation, excluding boundary points and regularly sampled validation points. 
+            gdf_validation_points, Geodataframe: Contains a spatially uniform subset of sonar points used for validation, selected at the specified interval, also excluding boundary points.
+
+    functionality:
+    This function is designed to support validation of spatial interpolation methods by systematically splitting the dataset into two subsets: one for interpolation and one for validation. Boundary points, which are  used to constrain edge conditions in interpolation, are excluded from both subsets, because of lower point density and pointlessnes in validation. Among the remaining sonar points, every sample_rate-th point is selected as a validation point, ensuring an even spatial distribution. This method helps maintain the representativeness of the validation set across the surveyed area while minimizing bias. The remaining points form the interpolation dataset. This approach is particularly useful for testing interpolation accuracy or for cross-validation during model development.
+
+correct_waterlevel
+    input: gdf: GeoDataFrame containing sonar measurement data, including depth and spatial coordinates.
+            data_dir: Path to data-folder including one "waterlevel" folder with a CSV file "waterlevel.csv" containing mesaured water levels. "waterlevel.scv" contains "waterlevel" in m and "date" in (DD/MM/YYYY-format)column  The earliest measurement must be of same day or earlier than the first sonar measurment. The latest measuremnt must be at the same day or later than latest sonar-measurement.
+            reference_day (optional): Reference day for depth correction (MM/DD/YYYY format), if empty, reference day gets determined automatically
+
+    output: gdf_corrected: GeoDataFrame with updated depth values:
+                                    [Depth (m)]: Corrected depth values, adjusted for water level fluctuations.
+                                    [Depth_uncorrected (m)]: Original depth values before correction.
+                                        Other columns remain unchanged.
+
+            message: "Reference day from user input: MM/DD/YYYY" - if user gave reference date
+                       or
+                        "Reference day automatically set to: MM/DD/YYYY" - if reference day gt automatically determined
+                        with MM/DD/YYY being the reference day used for the calculations.
+
+    functionality: The function corrects measured depth values (Depth (m)) based on water level fluctuations recorded in waterlevel_csv. 
+    Uses "Date" from, that gets completed from date/Time if it has missing values. Date gets srted by unique values. 
+    Matches are searched with date in waterlevel. Converts date in numerical values and uses np.interp() to linearly interpolate missing water levels for measurement days. Reference day gets determined, if not given by user input, by Choose the first measurement day with an exact match in the water level dataset. 
+    If no exact match exists, select the closest date based on proximity to available water level records.
+    Calculate the depth correction: Depth (m) = Depth (m) - (waterlevel_measurement - waterlevel_reference), except if Depth (m) == 0  (should only happen at artifical edge points). 
+    Store corrected data in Depth (m) and the original uncorrected data in "Depth_uncorrected (m)".
+
+
+Combining fault detection functions:
+If both techniques should be applied:
+    automatic_detection & manual_overwrite(in interactive_error_correction) = True
+If only one technique should be applied - turn this one True, other False
+
+If a a sufficent filtering was figuered out and safed in "faulty_points_dir" but want to run the code again, turn both False. The filtering will be applied again. Just make sure the point order stays the same.
+
+
 
 detect_and_remove_faulty_depths
     input: geodf_projected, GeoDataFrame - output of adjust_depths or create_multibeam_points for correction without edge points
@@ -191,31 +232,8 @@ detect_and_remove_faulty_depths
     Checks if automatic_detection =False - if so, the rest will be skipped. geodf_projected will be skipped and removed_gdf an empty gdf
     Saves original index in "orig_index". Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. Uses cKDTress for neighor identification. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artifical_boundary_point. Artifical edge points get recognised for average depth but wont be discarded as faulty points.
 
-filter_validation_points
 
-
-
-
-correct_waterlevel
-    input: gdf: GeoDataFrame containing sonar measurement data, including depth and spatial coordinates.
-            data_dir: Path to data-folder including one "waterlevel" folder with a CSV file "waterlevel.csv" containing mesaured water levels. "waterlevel.scv" contains "waterlevel" in m and "date" in (DD/MM/YYYY-format)column  The earliest measurement must be of same day or earlier than the first sonar measurment. The latest measuremnt must be at the same day or later than latest sonar-measurement.
-            reference_day (optional): Reference day for depth correction (MM/DD/YYYY format), if empty, reference day gets determined automatically
-
-    output: gdf_corrected: GeoDataFrame with updated depth values:
-                                    [Depth (m)]: Corrected depth values, adjusted for water level fluctuations.
-                                    [Depth_uncorrected (m)]: Original depth values before correction.
-                                        Other columns remain unchanged.
-
-            message: "Reference day from user input: MM/DD/YYYY" - if user gave reference date
-                       or
-                        "Reference day automatically set to: MM/DD/YYYY" - if reference day gt automatically determined
-                        with MM/DD/YYY being the reference day used for the calculations.
-
-    functionality: The function corrects measured depth values (Depth (m)) based on water level fluctuations recorded in waterlevel_csv. Uses "Date" from, that gets completed from date/Time if it has missing values. Date gets srted by unique values. Matches are searched with date in waterlevel. Converts date in numerical values and uses np.interp() to linearly interpolate missing water levels for measurement days. Reference day gets determined, if not given by user input, by Choose the first measurement day with an exact match in the water level dataset. If no exact match exists, select the closest date based on proximity to available water level records.Calculate the depth correction: Depth (m) = Depth (m) - (waterlevel_measurement - waterlevel_reference), except if Depth (m) == 0  (should only happen at artifical edge points). Store corrected data in Depth (m) and the original uncorrected data in "Depth_uncorrected (m)".
-
-
-
-Functions of manual_error_correction
+interactive_error_correction
 
 libraries: 
 from pathlib import Path
