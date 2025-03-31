@@ -12,7 +12,7 @@ from tqdm import tqdm
 def interactive_error_correction(
         faulty_points_dir:Path,
         filtered_gdf: gpd.GeoDataFrame,
-        manual_overwrite = True  #User changeable: True / False
+        manual_overwrite:bool = True  #User changeable: True / False
         ):
     
     """
@@ -191,7 +191,7 @@ def interactive_error_correction(
 
 
 
-def filter_validation_points(com_gdf: gpd.GeoDataFrame, sample_rate: int= 9):
+def filter_validation_points(com_gdf: gpd.GeoDataFrame, sample_rate: int= 9, create_validation_data:bool=True):
    
     """
     Split dataset into interpolation and validation point-datasets by regular sampling.
@@ -202,11 +202,15 @@ def filter_validation_points(com_gdf: gpd.GeoDataFrame, sample_rate: int= 9):
     args:
         com_gdf: GeoDataFrame - full bathymetric dataset including sonar points and artificial boundary points
         sample_rate : int - count of points sorted into validation dataset
+        create_validation_data: bool - if set FALSE, sampling of validation data will be skipped, and emtpy dataframes will be returned
 
     returns:
         gdf_interpol_points: GeoDataFrame - points used for interpolation (excluding boundary and validation points)
         gdf_validation_points: GeoDataFrame - regularly sampled validation points (excluding boundary points)
     """
+
+    if create_validation_data==False:
+        return gpd.GeoDataFrame(), gpd.GeoDataFrame()
 
     # calculate without boundary points
     mask_boundary = com_gdf["file_id"] == "artificial_boundary_points"

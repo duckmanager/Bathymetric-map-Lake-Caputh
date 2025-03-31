@@ -332,7 +332,7 @@ def create_interpolated_coords(sum_df, gps_gdf):
     gps_gdf["next_DOP_lon"] = gps_gdf.groupby("date")["DOP (lon)"].shift(-1)
 
     # Merge sum_df with gps_gdf by date and utc
-    print("merge GPS and sum data")
+    print("merge GPS and sonar data")
     merged = pd.merge(
         sum_df,
         gps_gdf,
@@ -378,7 +378,7 @@ def create_interpolated_coords(sum_df, gps_gdf):
 
     # Count and print amount of points without interpolated coordinates (not two consecutive seconds or high DOP)
     removed_points = merged["Interpolated_Long"].isna().sum()
-    print(f"reomoved points: {removed_points} (no interpolation possible).")
+    print(f"reomoved points: {removed_points} (not two consecutive samples or low associated GPS-precision).")
 
     # Drop all rows without interpolated coordinates
     merged = merged.dropna(subset=["Interpolated_Long", "Interpolated_Lat"])

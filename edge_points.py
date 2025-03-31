@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from pathlib import Path
 import pandas as pd
 import geopandas as gpd
 import numpy as np
 from scipy.spatial import cKDTree
 
-def generate_boundary_points(data_dir):
+def generate_boundary_points(shp_data_dir:Path, point_data_dir:Path):
     
     """
     Generate depth points around a lake shoreline based on manual measurments.
@@ -17,7 +18,8 @@ def generate_boundary_points(data_dir):
     (more details in Readme)
     
     args:
-        data_dir: Path - path to the folder including the shapefile of the lake and CSV file with measured edge depths
+        shp_data_dir: Path - path to the folder including the shapefile of the lake
+        point_data_dir: Path - path to the folder containing CSV file with measured edge depths
 
     returns:
         boundary_gdf: GeoDataFrame - boundary points with geometry, UTM coordinates, depth, date, and file identifier ("artificial_boundary_points")
@@ -28,14 +30,14 @@ def generate_boundary_points(data_dir):
     extrapolation_distance = 15  # distance to extrapolate measured depth to the side without measured point within interpolation_distance
 
     # load lake edge and transform to line-geometry
-    lake_boundary = gpd.read_file(data_dir / "shp_files" / "waterbody.shp").to_crs(
+    lake_boundary = gpd.read_file(shp_data_dir / "waterbody.shp").to_crs(
         "EPSG:25833"
     )
     boundary = lake_boundary.unary_union.exterior
 
     # load measured points and transform into gdf
     edge_points = pd.read_csv(
-        data_dir / "outline" / "measured_edgepoints.csv" # oder "measured_edgepoints.csv"
+        point_data_dir / "measured_edgepoints.csv" # oder "measured_edgepoints.csv"
     )  # change name and N E - change in readme
     edge_gdf = gpd.GeoDataFrame(
         edge_points,

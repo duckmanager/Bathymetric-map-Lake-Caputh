@@ -365,7 +365,7 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
 
 
 def main():
-    data_dir = Path("output/multibeam")
+    data_dir = Path("output/processed_data")
     print("reading data")
     filtered_data_df = pd.read_csv(data_dir/"filtered_data.csv")
     filtered_data_df["geometry"] = filtered_data_df["geometry"].apply(wkt.loads)
@@ -386,8 +386,10 @@ def main():
 
     print("saving data")
 
-    data_output_dir = Path("output/multibeam/QC")
-    used_points_intersections_gdf.to_csv(data_output_dir/"QC_closepointvalidation_used_points.csv", index=False)
+    data_output_dir = Path("output/QC")
+    used_points_intersections_gdf.to_csv(data_output_dir/"QC_intersections_used_points.csv", index=False)
+    used_points_closep_gdf.to_csv(data_output_dir/"QC_closepoints_used_points.csv", index=False)
+
 
     input("done!")
 

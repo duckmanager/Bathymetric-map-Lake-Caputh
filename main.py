@@ -26,6 +26,8 @@ def get_args():
     ######################################
     # OPTIONS
     ######################################
+    
+    ####### automatic point filtering
     arg_par.add_argument(
         "--automatic_detection",
         default=True,
@@ -37,20 +39,62 @@ def get_args():
 
     arg_par.add_argument(
         "--filtering_max_distance",
+        default=5,
+        type=float,
+        help="Radius of area for automatic filtering. (in meters)",
+    )
+
+    arg_par.add_argument(
+        "--filtering_threshold",
         default=0.5,
         type=float,
-        help="Radius of area for automatic filtering.",
+        help="Threshold of discarding-difference between points to neighbor-points-mean in automatic filtering. (in meters)",
+    )
+    
+    ####### manual point filtering
+
+    arg_par.add_argument(
+        "--manual_correction_overwrite",
+        action="store_false",
+        help="Set this flag to disable triggering manual point inspection, when marked points already exist (default: manual_overwirte= True)."
+    )
+
+    ####### waterlevel correction
+
+    arg_par.add_argument(
+        "--level_reference_date",
+        default="",
+        type=str,
+        help="Reference day for water level correction in format: m/d/y. (optional)",
+    )
+
+    ####### creating validation dataset
+   
+    arg_par.add_argument(
+        "--skip_validation_sampling",
+        action="store_false",
+        help="Set this flag to disable sampling of validation data."
+    )
+
+    arg_par.add_argument(
+        "--validation_sample_rate",
+        default=9,
+        type=int,
+        help="Every n-th point gets added to the validation dataset.",
     )
 
     ######################################
     # PATHS
     ######################################
+    
+    ####### input data paths
+
     arg_par.add_argument(
         "--sonar_data_dir",
         "-sdd",
         default=Path().joinpath("data", "sonar_data"),
         type=Path,
-        help="path to folder with sonar data",
+        help="Path to folder with sonar data.",
     )
 
     arg_par.add_argument(
@@ -58,55 +102,105 @@ def get_args():
         "-gpsd",
         default=Path().joinpath("data", "gps_data"),
         type=Path,
-        help="path to folder with the external gps data",
+        help="Path to folder with the external gps data.",
     )
-    # TODO: add ->
-    # flag for automatic correction
-    # automatic correction radius
-    # automatic correction threshold
-    # optional reference date
-    # flag for manual correction
-    # path to water level correction file
-    # path to waterbody shape file
-    # path to outline measurements file
-    # path to dir with sonar data
-    # path to dir with gps data
-    # path to store faulty_points
-    # sample rate - in validation points
+
+    arg_par.add_argument(
+        "--water_level_dir",
+        "-wld",
+        default=Path().joinpath("data", "waterlevel"),
+        type=Path,
+        help="Path to folder with waterlevel csv.",
+    )
+
+    arg_par.add_argument(
+        "--lake_shp_dir",
+        "-lsd",
+        default=Path().joinpath("data", "shp_files"),
+        type=Path,
+        help="Path to folder with shp-file of the waterbody",
+    )
+
+    arg_par.add_argument(
+        "--point_data_dir",
+        "-pdd",
+        default=Path().joinpath("data", "outline"),
+        type=Path,
+        help="Path to folder with csv of edge measurments.",
+    )
+    
+    ####### output data paths
+    
+    arg_par.add_argument(
+        "--finished_dataset_dir",
+        "-fdd",
+        default=Path().joinpath("output", "processed_data"),
+        type=Path,
+        help="Path to folder to store csv of finished dataset.",
+    )
+
+    arg_par.add_argument(
+        "--validation_dataset_dir",
+        "-vdd",
+        default=Path().joinpath("output", "validation_data"),
+        type=Path,
+        help="Path to folder to store csv's of validation datasets.",
+    )
+
+    arg_par.add_argument(
+        "--QC_dataset_dir",
+        "-qcd",
+        default=Path().joinpath("output", "QC"),
+        type=Path,
+        help="Path to folder to store csv for later quality assesment.",
+    )
+
+    arg_par.add_argument(
+        "--faulty_points_dir",
+        "-fpd",
+        default=Path().joinpath("output", "faulty_points"),
+        type=Path,
+        help="Path to folder to store csv with erroneous marked sample points.",
+    )
 
     return arg_par.parse_args()
+    
+    ######################################
+    ######################################
 
 
 if __name__ == "__main__":
     logging.basicConfig(
-        format="%(levelname)s : %(asctime)s : %(message)s", level=logging.INFO
-    )
+        format="%(levelname)s : %(asctime)s : %(message)s", 
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=logging.INFO)
 
     # logging.getLogger().setLevel(logging.INFO)
     args = get_args()
 
-    # logging.info(f"path: {args.some_file} with type {type(args.some_file)}. exists: {args.some_file.is_file()}")
+    ######################################
+    # functions
+    ######################################
 
-    data_dir = Path("data")
-    faulty_points_dir= Path("output/faulty_points")
     logging.info("starting to create empty dataframe")
     sum_dataframe_empty, sum_header = create_dataframe(args.sonar_data_dir)
+
     logging.info("assigning data to dataframe and correcting sonar-GPS times")
     sum_dataframe = assign_data_to_dataframe(
-        args.sonar_data_dir, sum_dataframe_empty, sum_header
-    )
-    logging.info("starting get_gps")
+        args.sonar_data_dir, sum_dataframe_empty, sum_header)
+    
+    logging.info("reading external-GPS data")
     gps_geodf_projected = get_gps_dataframe(args.gps_data_dir)  # including interpolation
+
     logging.info("creating interpolated points")
     interpolated_sum, used_gps_gdf = create_interpolated_coords(
-        sum_dataframe, gps_geodf_projected
-    )
+        sum_dataframe, gps_geodf_projected)
 
-    logging.info("create multibeam points")
+    logging.info("creating multibeam points")
     multipoint_gdf = create_multibeam_points(interpolated_sum)
 
     logging.info("creating lake outlines")
-    boundary_gdf = generate_boundary_points(data_dir)
+    boundary_gdf = generate_boundary_points(args.lake_shp_dir, args.point_data_dir)
 
     logging.info("merging boundary points and measurment points")
     gdf_combined = combine_multibeam_edge(multipoint_gdf, boundary_gdf)
@@ -114,52 +208,41 @@ if __name__ == "__main__":
     logging.info("adjusting depths")
     adjusted_gdf = adjust_depths(gdf_combined)
 
-    gdf_waterlevel_corrected = correct_waterlevel(adjusted_gdf, data_dir)
+    logging.info("adjusting waterlevels")
+    gdf_waterlevel_corrected = correct_waterlevel(adjusted_gdf, args.water_level_dir, reference_day="")
 
-    logging.info("detecting and removing faulty depths")
+    logging.info("Applying automated point filtering")
     filtered_data, faulty_data = detect_and_remove_faulty_depths(
         gdf_waterlevel_corrected,
-        faulty_points_dir,
+        faulty_points_dir= args.faulty_points_dir,
         max_distance=args.filtering_max_distance,
-        automatic_detection=args.automatic_detection
-    )  # Reihenfolge umgekehrt
+        threshold=args.filtering_threshold,
+        automatic_detection=args.automatic_detection)  
 
-    logging.info("detecting and removing faulty depths")
-    auto_filtered_data, faulty_data = detect_and_remove_faulty_depths(
-        gdf_waterlevel_corrected,
-        faulty_points_dir,
-        max_distance=args.filtering_max_distance,
-        automatic_detection=args.automatic_detection
-    )     
-
-    logging.info("starting manual error detection")
-    filtered_data = interactive_error_correction(faulty_points_dir, gdf_waterlevel_corrected, manual_overwrite= True )# change to argparse.
+    logging.info("Starting manual point filtering")
+    filtered_data = interactive_error_correction(
+        args.faulty_points_dir,
+        gdf_waterlevel_corrected, 
+        args.manual_correction_overwrite)
 
 
     logging.info("Removing points for validation")
-    gdf_com, gdf_validation_points = filter_validation_points(filtered_data)
-    # -logging.info("reducing data")
-    # -selected_sum_data, selected_faulty_sum_data = reduce_data(filtered_data, faulty_data)
+    gdf_com, gdf_validation_points = filter_validation_points(
+        filtered_data,
+        sample_rate=args.validation_sample_rate,
+        create_validation_data=args.skip_validation_sampling)
+
+
+
     logging.info("saving output")
-    output_path = Path("output/multibeam")
-    filtered_data.to_csv(output_path / "filtered_data.csv", index=False)
-    gdf_waterlevel_corrected.to_csv(output_path / "unfiltered_data.csv", index=False)
-    filtered_data.to_csv(output_path / "m_newutc_filtered_newedge.csv", index=False)
-    if (
-        not faulty_data.empty
-    ):  # only save fautly data, when detect_and_remove_faulty_depths did run
-        faulty_data.to_csv(
-            output_path / "interactive_error" / "interactive_error_points.csv",
-            index=False,
-        )
 
-    gdf_com.to_csv(output_path / "multibeam_filtered_for_validation.csv", index=False)
-    gdf_validation_points.to_csv(
-        output_path / "multibeam_validation_points.csv", index=False
-    )
+    filtered_data.to_csv(args.finished_dataset_dir / "filtered_data.csv", index=False)
+    gdf_waterlevel_corrected.to_csv(args.finished_dataset_dir / "unfiltered_data.csv", index=False)
 
-    output_QC_path = Path("output/multibeam/QC")
-    used_gps_gdf.to_csv(output_QC_path / "used_GPS_points.csv", index=False)
+    gdf_com.to_csv(args.validation_dataset_dir / "filtered_for_validation.csv", index=False)
+    gdf_validation_points.to_csv(args.validation_dataset_dir / "validation_points.csv", index=False)
+
+    used_gps_gdf.to_csv(args.QC_dataset_dir / "used_GPS_points.csv", index=False)
 
     # -filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
     # -  faulty_data.to_csv(output_path / "sum_multibeam_error.csv", index=False)

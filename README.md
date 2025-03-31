@@ -176,6 +176,7 @@ adjust_depths
 filter_validation_points
     input: com_gdf, Geodataframe - containing the full set of bathymetric data points
             sample_rate, int - rate at which every point gets assigned to validation dataset
+            create_validation_data, bool - if set FALSE, dataset splitting will be skipped and empty dataframes will be returned.
 
     output: gdf_interpol_points, Geodataframe: Contains all remaining sonar points used for interpolation, excluding boundary points and regularly sampled validation points. 
             gdf_validation_points, Geodataframe: Contains a spatially uniform subset of sonar points used for validation, selected at the specified interval, also excluding boundary points.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+from pathlib import Path
 import pandas as pd
 import geopandas as gpd
 import numpy as np
@@ -34,7 +35,7 @@ def adjust_depths(com_gdf: gpd.GeoDataFrame):
 #########################################################################################################################################################
 
 
-def correct_waterlevel(gdf, data_dir, reference_day=""):
+def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str=""):
     
     """
     Correct depth values based on daily water level fluctuations.
@@ -44,7 +45,7 @@ def correct_waterlevel(gdf, data_dir, reference_day=""):
     (more details in Readme)
     args:
         gdf: GeoDataFrame - depth data (sonar and edge point) with measurement date and depth
-        data_dir: Path - data directory containing "waterlevel/waterlevel.csv" with measured daily water levels (format: DD/MM/YYYY)
+        data_dir: Path - data directory containing "waterlevel.csv" with measured daily water levels (format: DD/MM/YYYY)
         reference_day: str (optional) - reference day in MM/DD/YYYY format; if empty, the function selects the best match automatically
 
     returns:
@@ -63,7 +64,7 @@ def correct_waterlevel(gdf, data_dir, reference_day=""):
     gdf["Date_dt"] = pd.to_datetime(gdf["Date"], format="%m/%d/%Y")
 
     # 3.load CSV with measured waterlevels (CSV-Date Format: DD/MM/YYYY) and Datetransformation
-    wl = pd.read_csv(data_dir / "waterlevel" / "waterlevel.csv", sep=";")
+    wl = pd.read_csv(data_dir / "waterlevel.csv", sep=";")
     wl["date_dt"] = pd.to_datetime(wl["date"], dayfirst=True, errors="raise")
     wl = wl.sort_values("date_dt")
 

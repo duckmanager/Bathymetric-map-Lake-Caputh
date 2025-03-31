@@ -14,7 +14,7 @@ def detect_and_remove_faulty_depths(
     faulty_points_dir:Path,
     max_distance: int = 5,
     threshold: float = 0.5,
-    automatic_detection=False     # set True / False if autoamtic correction should be applied - if True existing csv with faulty depths will be overwritten
+    automatic_detection=True     # set True / False if autoamtic correction should be applied - if True existing csv with faulty depths will be overwritten
 ):
 
     """
