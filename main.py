@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""
+Main Skript to transform River Surveyor M9 data and connect the datapoints to externally collected GPS points
+"""
 import argparse
 from pathlib import Path
 import logging
@@ -78,7 +81,7 @@ def get_args():
 
     arg_par.add_argument(
         "--validation_sample_rate",
-        default=9,
+        default=7,
         type=int,
         help="Every n-th point gets added to the validation dataset.",
     )
@@ -152,7 +155,7 @@ def get_args():
         "-qcd",
         default=Path().joinpath("output", "QC"),
         type=Path,
-        help="Path to folder to store csv for later quality assesment.",
+        help="Path to folder to store csv's for later quality assesment.",
     )
 
     arg_par.add_argument(
@@ -160,7 +163,7 @@ def get_args():
         "-fpd",
         default=Path().joinpath("output", "faulty_points"),
         type=Path,
-        help="Path to folder to store csv with erroneous marked sample points.",
+        help="Path to folder to store csv with marked erroneous sample points.",
     )
 
     return arg_par.parse_args()

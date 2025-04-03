@@ -1,3 +1,12 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Secondary Sktript to validate the measuring consistency of the processed data from the main skript.
+"""
+# librarys:
+import argparse
+import logging
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -10,10 +19,74 @@ from collections import defaultdict
 
 
 
+def get_args():
+    arg_par = argparse.ArgumentParser()
 
+    #################
+    # Options
+    #################
+    arg_par.add_argument(
+        "--matching_radius",
+        default=0.2,
+        type=float,
+        help="Max distance to match points for depth comparison.",
+    )
+
+    arg_par.add_argument(
+        "--min_time_diff",
+        default=pd.Timedelta(minutes=5),
+        type=pd.Timedelta,
+        help="Min time difference to match points for depth comparison.",
+    )
+
+    #################
+    # Paths
+    #################
+    arg_par.add_argument(
+        "--data_dir",
+        "-dd",
+        default=Path().joinpath("output", "processed_data"),
+        type=Path,
+        help="Path to folder with the processed dataset.",
+    )
+
+    arg_par.add_argument(
+        "--output_data_dir",
+        "-odd",
+        default=Path().joinpath("output", "QC"),
+        type=Path,
+        help="Path to folder to store the results of the quality controle.",
+    )
+
+    return arg_par.parse_args()
+    
+    ######################################
+    ######################################
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        format="%(levelname)s : %(asctime)s : %(message)s", 
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=logging.INFO)
+
+    # logging.getLogger().setLevel(logging.INFO)
+    args = get_args()
+
+
+
+
+
+
+
+
+
+
+#########################################################################################################################################
+# processing functions
 
 def calculate_depth_differences_intersections(transformed_gdf, 
-    max_distance: str = 0.2,  # meters
+    max_distance: float = 0.2,  # meters
     min_time_diff = pd.Timedelta(minutes=5)):  # min time difference between points):
     """
     Calculate depth differences between spatially close and temporally distinct points.
@@ -110,12 +183,12 @@ def calculate_depth_differences_intersections(transformed_gdf,
 
         # Save differences with valid order
         for neighbor_idx, match_depth, match_time, match_date in zip(valid_neighbors, valid_depths, valid_times, valid_dates):
-            # Calculate in correct order: earlier point - later point
+            # Calculate in correct order: erlier point - later point
             if match_time > point_time:
-                depth_diff = point_depth - match_depth  # switch for later - eralier point
+                depth_diff = point_depth - match_depth  # later - earlier point
                 earlier_date, later_date = point_date, match_date
             else:
-                depth_diff = match_depth - point_depth  # switch for later - eralier point
+                depth_diff = match_depth - point_depth  # later - earlier point
                 earlier_date, later_date = match_date, point_date
 
             
@@ -134,7 +207,7 @@ def calculate_depth_differences_intersections(transformed_gdf,
     return depth_diff_df, used_points_gdf
 
 
-def calculate_depth_differences_close_points(transformed_gdf, max_distance:str=0.2):
+def calculate_depth_differences_close_points(transformed_gdf, max_distance:float=0.2):
     """
     Calculate depth differences between spatially close points, regardless of time difference.
 
@@ -267,6 +340,7 @@ def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
         box: matplotlib object - the generated boxplot object (for optional further use or saving)
     """
 
+    # Compute basic statistics
     stats_df = pd.DataFrame({
         'Mean': depth_diff_df.mean(),
         'StdDev': depth_diff_df.std()
@@ -274,40 +348,40 @@ def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
 
     print(stats_df)
 
-
-    # create a boxplot with the statistics - maybe change to saveing to files later 
-    # determines scale of figure
+    # Create boxplot figure
     fig, ax = plt.subplots(figsize=(12, 6))
+    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns],
+                     labels=depth_diff_df.columns, patch_artist=True)
 
-    # create boxplot
-    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns], 
-                      labels=depth_diff_df.columns, patch_artist=True)
+    # Format x-axis labels: from YYYY-MM-DD-YYYY-MM-DD to dd.mm-dd.mm.yy
+    def format_label(label):
+        parts = label.split('-')
+        if len(parts) == 6:
+            return f"{parts[2]}.{parts[1]}-{parts[5]}.{parts[4]}.{parts[3][2:]}"
+        return label
+    new_labels = [format_label(col) for col in depth_diff_df.columns]
+    ax.set_xticklabels(new_labels, rotation=45, ha='right')
 
-    # change date formatting
+    # Determine vertical position for annotation text
+    y_pos = max(depth_diff_df.max(skipna=True)) * 1.2 if not depth_diff_df.isna().all().all() else 1
 
-
-    # scales uniform height of count for used points per boxplot
-    y_pos = max(depth_diff_df.max(skipna=True)) * 1.1 if not depth_diff_df.isna().all().all() else 1
-
-    # shows count for used points per boxplot
+    # Annotate each box with n (number of values) and mean
     for i, col in enumerate(depth_diff_df.columns, start=1):
         n_points = depth_diff_df[col].count()
+        mean_val = depth_diff_df[col].mean()
         ax.text(i, y_pos, f"n={n_points}", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        ax.text(i, y_pos * 0.97, f"Ø={mean_val:.2f}", ha='center', va='top', fontsize=9, color='black')
 
-    # axis label and title
-    ax.set_xlabel("Daten überschneidener Messreihen")
-    ax.set_ylabel("Tiefenunterschied (m)")
-    ax.set_title("Tiefenunterschiede überschneidener Messreihen")
-
-    # x-and y- axis modifications
-    plt.xticks(rotation=45, ha='right')
-    ax.set_ylim(None, y_pos * 1.2)  # Extra Platz nach oben
+    # axis label
+    ax.set_xlabel("Daten überschneidener Messreihen")  # Overlapping measurement dates
+    ax.set_ylabel("Tiefenunterschied (m)")  # Depth difference
+    ax.set_title("Tiefenunterschiede überschneidener Messreihen")  # Depth differences of intersecting surveys
+    ax.set_ylim(None, y_pos * 1.2)
 
     plt.tight_layout()
     plt.show()
 
-    # add tilte, maybe better date format, axis text, possibility to safe
-    return stats_df, box
+    return stats_df, fig
 
 
 def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
@@ -325,73 +399,84 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
         box: matplotlib object - the generated boxplot object (for optional reuse or export)
     """
 
+    # Compute basic statistics
     stats_df = pd.DataFrame({
         'Mean': depth_diff_df.mean(),
         'StdDev': depth_diff_df.std()
     })
 
     print(stats_df)
-    # create a boxplot with the statistics - maybe change to saveing to files later 
+
+    # Erstelle Boxplot
+    # Create boxplot figure
     fig, ax = plt.subplots(figsize=(12, 6))
+    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns],
+                     labels=depth_diff_df.columns, patch_artist=True)
 
-    # create boxplot
-    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns], 
-                      labels=depth_diff_df.columns, patch_artist=True)
+    # Format der Achsenbeschriftung ändern: YYYY-MM-DD-YYYY-MM-DD → dd.mm-dd.mm.yy
+    # Format x-axis labels: from YYYY-MM-DD-YYYY-MM-DD to dd.mm-dd.mm.yy
+    def format_label(label):
+        parts = label.split('-')
+        if len(parts) == 6:
+            return f"{parts[2]}.{parts[1]}-{parts[5]}.{parts[4]}.{parts[3][2:]}"
+        return label
+    new_labels = [format_label(col) for col in depth_diff_df.columns]
+    ax.set_xticklabels(new_labels, rotation=45, ha='right')
 
-    # scales uniform height of count for used points per boxplot
-    y_pos = max(depth_diff_df.max(skipna=True)) * 1.1 if not depth_diff_df.isna().all().all() else 1
+    # Höhe für Textanzeigen berechnen
+    # Determine vertical position for annotation text
+    y_pos = max(depth_diff_df.max(skipna=True)) * 1.2 if not depth_diff_df.isna().all().all() else 1
 
-    # shows count for used points per boxplot
+    # Zeige n und Mittelwert an
+    # Annotate each box with n (number of values) and mean
     for i, col in enumerate(depth_diff_df.columns, start=1):
         n_points = depth_diff_df[col].count()
+        mean_val = depth_diff_df[col].mean()
         ax.text(i, y_pos, f"n={n_points}", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        ax.text(i, y_pos * 0.97, f"Ø={mean_val:.2f}", ha='center', va='top', fontsize=9, color='black')
 
-    # axis label and title
-    ax.set_xlabel("Daten verglichener Punkte")
-    ax.set_ylabel("Tiefenunterschied (m)")
-    ax.set_title("Tiefenunterschiede naheliegender Punkte")
-
-    # x-and y- axis modifications
-    plt.xticks(rotation=45, ha='right')
-    ax.set_ylim(None, y_pos * 1.2)  # Extra Platz nach oben
+    # Achsentitel
+    ax.set_xlabel("Daten verglichener Punkte")  # Compared point dates
+    ax.set_ylabel("Tiefenunterschied (m)")  # Depth difference
+    ax.set_title("Tiefenunterschiede naheliegender Punkte")  # Depth differences of close points
+    ax.set_ylim(None, y_pos * 1.2)
 
     plt.tight_layout()
     plt.show()
-    # add tilte, maybe better date format, axis text, possibility to safe
-    return stats_df, box
 
-
+    return stats_df, fig
 
 
 
 def main():
-    data_dir = Path("output/processed_data")
-    print("reading data")
+    data_dir = args.data_dir
+    logging.info("reading data")
     filtered_data_df = pd.read_csv(data_dir/"filtered_data.csv")
     filtered_data_df["geometry"] = filtered_data_df["geometry"].apply(wkt.loads)
     filtered_data= gpd.GeoDataFrame(filtered_data_df, crs='EPSG:25833', geometry="geometry")
 
 
-    print("Calculating depth difference on intersections")
-    depth_difference_intersections, used_points_intersections_gdf= calculate_depth_differences_intersections(filtered_data)
+    logging.info("Calculating depth difference on intersections")
+    depth_difference_intersections, used_points_intersections_gdf= calculate_depth_differences_intersections(filtered_data, max_distance=args.matching_radius, min_time_diff= args.min_time_diff)
 
-    print("Calculating depth difference of close points")
-    depth_difference_closep, used_points_closep_gdf = calculate_depth_differences_close_points(filtered_data)
+    logging.info("Calculating depth difference of close points")
+    depth_difference_closep, used_points_closep_gdf = calculate_depth_differences_close_points(filtered_data, max_distance=args.matching_radius)
 
-    print("calculating statics")
-    print("statics depth difference intersections")
-    stats_intersec_df, boxintersec_plot = compute_statistics_intersections(depth_difference_intersections)
-    print("statistics depth diffference close points")
-    stats_closep_df, box_closep_plot = compute_statistics_closepoints(depth_difference_closep)
+    logging.info("calculating statics")
+    logging.info("statics depth difference intersections")
+    stats_intersec_df, intersec_plot = compute_statistics_intersections(depth_difference_intersections)
+    logging.info("statistics depth diffference close points")
+    stats_closep_df, closep_plot = compute_statistics_closepoints(depth_difference_closep)
 
-    print("saving data")
-
-    data_output_dir = Path("output/QC")
+    logging.info("saving data")
+    data_output_dir = args.output_data_dir
     used_points_intersections_gdf.to_csv(data_output_dir/"QC_intersections_used_points.csv", index=False)
     used_points_closep_gdf.to_csv(data_output_dir/"QC_closepoints_used_points.csv", index=False)
+    intersec_plot.savefig(data_output_dir/ "boxplot_QC_time_n_space_diff.png", dpi=300, bbox_inches="tight")
+    closep_plot.savefig(data_output_dir/ "boxplot_QC_space_diff.png", dpi=300, bbox_inches="tight")
 
-
-    input("done!")
+    logging.info("The Quality Assessment is done!")
 
 
 main()
+

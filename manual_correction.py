@@ -55,7 +55,8 @@ def interactive_error_correction(
             boundary_points = df[df['file_id'] == "artificial_boundary_points"] # dont filter edge points
             df_corrected = pd.concat([df.drop(bad), boundary_points], ignore_index=True) # filter faulty points 
             print(f"({len(bad)}) marked error points got loaded and removed from data")
-            exit()
+            
+            return df_corrected
         else:
             # manual overwrite = True -> manual error correction is started with or without existing faulty points
             removed_points_df = pd.read_csv(FILTER_CSV)
@@ -208,7 +209,7 @@ def filter_validation_points(com_gdf: gpd.GeoDataFrame, sample_rate: int= 9, cre
         gdf_interpol_points: GeoDataFrame - points used for interpolation (excluding boundary and validation points)
         gdf_validation_points: GeoDataFrame - regularly sampled validation points (excluding boundary points)
     """
-
+    
     if create_validation_data==False:
         return gpd.GeoDataFrame(), gpd.GeoDataFrame()
 

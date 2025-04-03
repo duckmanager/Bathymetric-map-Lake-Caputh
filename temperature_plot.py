@@ -1,3 +1,8 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import argparse
+import logging
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,9 +20,46 @@ Two average temperature values are calculated and displayed in the plot:
 Each plot is saved as a PNG image in the output folder.
 """
 
-data_folder = Path("data/temperature")  # path to csv-data
-output_folder = Path("output/temperature_plots") # path to save the results
-depth_step = 0.1 # interpoaltion steps
+def get_args():
+    arg_par = argparse.ArgumentParser()
+
+#############
+# Paths
+#############
+    arg_par.add_argument(
+        "--temperature_data_dir",
+        "-dd",
+        default=Path().joinpath("output", "temperature_plot"),
+        type=Path,
+        help="Path to folder with csv of temperature measurments.",
+    )
+
+    arg_par.add_argument(
+        "--output_data_dir",
+        "-odd",
+        default=Path().joinpath("output", "temperature_plot"),
+        type=Path,
+        help="Path to folder to store the temperature plots.",
+    )
+
+###########
+# Options
+###########
+    arg_par.add_argument(
+        "--interpolation_steps",
+        default=0.1,
+        type=float,
+        help="Interpolation steps to use measurment of differnt depths for one mean curve.",
+    )
+
+    return arg_par.parse_args()
+args = get_args()
+
+
+
+data_folder = args.temperature_data_dir  # path to csv-data
+output_folder = args.output_data_dir # path to save the results
+depth_step: float=0.1 # interpoaltion steps
 
 # read data, iterate through all csv files
 for csv_file in data_folder.glob("*.csv"):
