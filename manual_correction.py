@@ -8,20 +8,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
 from tqdm import tqdm
+from shapely.geometry import Point, LineString
 
 def interactive_error_correction(
-        faulty_points_dir:Path,
+        faulty_points_dir: Path,
         filtered_gdf: gpd.GeoDataFrame,
-        manual_overwrite:bool = True  #User changeable: True / False
-        ):
-    
+        manual_overwrite: bool = True,
+        vb_window_size: int = 3  # Number of VB points before and after for local projection
+    ):
     """
     Manually inspect and remove faulty sonar depth points using interactive plotting.
 
-    Opens an interactive Matplotlib window for each survey run (file_id) to visually inspect and select erroneous depth points. 
-    Faulty points can be selected via clicking or dragging a rectangle. All selected points are saved to a CSV file and removed from the returned dataset. 
-    Previously saved selections can be applied without supervision or used to preselect points in the plots, depending on user settings.
-    (more details in README)
+    Opens an interactive Matplotlib window for each survey run (file_id) to visually inspect and mark erroneous depth points. 
+    Faulty points can be selected via single clicks or rectangular selection. Selected points are saved to a CSV and removed 
+    from the returned dataset. Previously saved selections are either applied automatically or preloaded into the plots for further editing.
+
+    If only one beam type is present, or if the 'Beam_type' column is missing, all points are treated as vertical beams (VB), 
+    and their position is calculated using cumulative distance along the survey track. No projection is performed in this case.
 
     args:
         faulty_points_dir: Path - directory containing or receiving "faulty_points.csv", which stores manually selected error points including their original index
@@ -33,17 +36,11 @@ def interactive_error_correction(
     returns:
         df_corrected: GeoDataFrame - same as input but with all manually selected faulty points removed; includes previously separated artificial boundary points
     """
-
-
-
-    # user settings: True => manual check, with or without existing faulty points; False => manual check only happends if no file with faulty points exists 
-    # can be used if manual correction already exists and should not be changed
-
-    FILTER_CSV = faulty_points_dir / "faulty_points.csv"  # csv with faulty points
-
+    
+    # Define CSV to store faulty points and copy the input dataframe
+    FILTER_CSV = faulty_points_dir / "faulty_points.csv"
     # load main data
     df = filtered_gdf
-
     # check for column with original index
     if 'orig_index' not in df.columns:
         df['orig_index'] = df.index
@@ -65,88 +62,114 @@ def interactive_error_correction(
     else:
         loaded_bad = []
 
-
-    # read survey data
-    #df = pd.read_csv(DATA_FILE)
-    # save edge points seperatly
+    # Separate edge points from main data
     boundary_points = df[df['file_id'] == "artificial_boundary_points"]
-
-    # remove edge points for further processing
     df = df[df['file_id'] != "artificial_boundary_points"]
+    all_bad_indices = []
 
-    bad_indices = []  # collection of faulty point indices 
+    # Process each survey (file_id) separately
+    for survey_id in tqdm(df['file_id'].unique(), desc="Processing surveys"):
+        sub_df = df[df['file_id'] == survey_id].copy()
 
-    # Iterate through all surveys showing progress with tqdm
-    for fid in tqdm(df['file_id'].unique(), desc="Messfahrten"): # iterate through each individual survey by file_id
-        subdf = df[df['file_id'] == fid] # create temporary dataframe only containing the current survey data
-        pts_all = []  # list of all points and their specific informations [Distance, depth, index, original color]
-        fig, ax = plt.subplots(figsize=(10, 6)) # create matplot figure
-        markers = {}  # dict for temporary saving selection of points
-        beams = subdf['Beam_type'].unique() # determine all unique beam types in the survey
-        colors = plt.cm.tab10(np.linspace(0, 1, len(beams))) # color palette with uniqe color for each beam type
-        
-        for color, beam in zip(colors, beams): # iterate through each beam
-            beam_df = subdf[subdf['Beam_type'] == beam].sort_index() # creates new dataframe for each beamkeeping original indices
-            if beam_df.empty:
-                continue
-            x_coords = beam_df['Longitude'].values # saves x and y coordinates in UTM32N
-            y_coords = beam_df['Latitude'].values
-            # Berechnung der kumulativen Distanz (in Metern)
-            dist = np.r_[0, np.cumsum(np.sqrt(np.diff(x_coords)**2 + np.diff(y_coords)**2))] # calculates the direct distance between each point starting from 0 and taking the sum for each new one. - same procedure could be used for point interpolation
-            depth = beam_df['Depth (m)'].values # saves eah depth value
-            ax.scatter(dist, depth, label=beam, color=color,s=15) # plots scatterplot with dist on the x axis and depth on the y axis, beam type in the legend and specific color per beam ; s changes the point size
-            for d, dep, idx in zip(dist, depth, beam_df.index): 
-                pts_all.append((d, dep, idx, color))   # saves distance, depth, index and color of each point for later selection
-        
-        ax.set_xlabel("Fahrstrecke (m)") # x-axis label
-        ax.set_ylabel("Tiefe (m)") # y-axis label
+        # Determine if there's only one beam type or if Beam_type is missing:
+        if ('Beam_type' not in sub_df.columns) or (sub_df['Beam_type'].nunique() == 1):
+            is_single_beam = True
+        else:
+            is_single_beam = False
+
+        # In single-beam scenario, treat all points as VB; otherwise, select only VB points
+        if is_single_beam:
+            vb_df = sub_df.copy()
+        else:
+            vb_df = sub_df[sub_df['Beam_type'] == "VB"].copy()
+
+        if vb_df.empty:
+            print(f"Survey {survey_id}: No VB points found. Skipping.")
+            continue
+
+        # Compute cumulative distances for VB points
+        vb_coords = np.column_stack((vb_df['Longitude'], vb_df['Latitude'])) # create Array from long, lat data
+        diff = np.diff(vb_coords, axis=0)
+        cum_dist = np.r_[0, np.cumsum(np.sqrt(np.sum(diff**2, axis=1)))] # using pythagoras to calculate each distance
+        vb_df['cum_dist'] = cum_dist
+
+        pts_all = []  # List to collect tuples: (projected x, depth, original index, color)
+        markers = {}  # Dictionary for active markers
+
+        # Prepare plot; use original colors for different beam types
+        fig, ax = plt.subplots(figsize=(10, 6))
+        colors = ["#000000", "#f25b60", "#59c347", "#4c62f6", "#f0cb49"] # prepare colors
+
+        # Get unique beam types; in one-beam scenario, all points are treated as VB
+        beams = sub_df['Beam_type'].unique() if 'Beam_type' in sub_df.columns else ["VB"]
+
+        # Process each beam type (if only one type, projection is just cumulative distance)
+        for color, beam in zip(colors, beams):
+            beam_df = sub_df if is_single_beam else sub_df[sub_df['Beam_type'] == beam].copy()
+            proj_list = [] # list for eahc calculate x-axis value
+            for idx, row in beam_df.iterrows(): # iterating over all points with beam type
+                x, y = row['Longitude'], row['Latitude']
+                current_pt = Point(x, y) # create shapely point to project on a line later
+                # In single-beam case or if beam=="VB": use cumulative distance directly.
+                if is_single_beam or (('Beam_type' in sub_df.columns) and beam == "VB"):
+                    proj_val = vb_df.loc[idx, 'cum_dist']
+                else: # For non-VB beams in multi-beam scenario, project onto local VB segment.
+                    vb_indices = np.array(vb_df.index) # find position on VB line
+                    vb_pos = np.searchsorted(vb_indices, idx)
+                    if vb_pos > 0 and vb_indices[vb_pos - 1] == idx:
+                        vb_pos -= 1
+                    # determine local window of VB-line to project the beams on
+                    start = max(0, vb_pos - vb_window_size)
+                    end = min(len(vb_df), vb_pos + vb_window_size + 1)
+                    seg = vb_df.iloc[start:end]
+                    if len(seg) >= 2:
+                        local_line = LineString(zip(seg['Longitude'], seg['Latitude'])) # create local linestring 
+                        proj_val = seg['cum_dist'].iloc[0] + local_line.project(current_pt) # project point on local linestring
+                    else:
+                        proj_val = 0
+                proj_list.append(proj_val) # save the x-axis location of the projected point
+                pts_all.append((proj_val, row['Depth (m)'], idx, color))
+            ax.scatter(proj_list, beam_df['Depth (m)'], label=beam, color=color, s=15) # show point in the plot
+
+        # visual plot settings
+        ax.set_xlabel("Fahrstrecke (m)")
+        ax.set_ylabel("Tiefe (m)")
         if pts_all:
-            min_depth = min(p[1] for p in pts_all) # searches smalles depth value
-            # Y-Achse: oberster Wert 0, unterster Wert = minimaler Tiefenwert minus 0.5 m Puffer
-            ax.set_ylim(min_depth - 0.5, 0) # set y-axis from 0 to lowest depth -0.5m for better visability
+            ax.set_ylim(min(p[1] for p in pts_all) - 0.5, 0)
         ax.legend()
-        plt.title(f"Messfahrt: {fid}")
-        
-        # NEU: Vorhandene Fehlerpunkte (bei manuellem Check) anzeigen
+        plt.title(f"Messfahrt: {survey_id}")
+
+        # Pre-mark loaded faulty points
         for p in pts_all:
-            if p[2] in loaded_bad:
-                marker, = ax.plot(p[0], p[1], 'ro', markersize=8)  # markiere bereits geladene Fehlerpunkte
+            if p[2] in loaded_bad: # p[0],p[1] are x- y coords in the plot, p[2] is the original Index
+                marker, = ax.plot(p[0], p[1], 'ro', markersize=8)
                 markers[p[2]] = marker
-                if p[2] not in bad_indices:
-                    bad_indices.append(p[2])
-        
-        # Click-Event: sselects closest point (in display / pixel coordinates)
-        def on_click(event): # when matplot recognizes a click
-            if event.inaxes != ax: # return if click is out of the plot axis
+        survey_bad_indices = [p[2] for p in pts_all if p[2] in loaded_bad] # create list of faulty points
+        points_coords = np.array([[p[0], p[1]] for p in pts_all]) # create array fpr diance caluclation in case of click for selection
+
+        # Single click event: toggle marker
+        def on_click(event):
+            if event.inaxes != ax or event.xdata is None or event.ydata is None: # return if click isout of the plot area
                 return
-            if event.xdata is None or event.ydata is None: # return if click is out of plot area
-                return
-            click_disp = ax.transData.transform((event.xdata, event.ydata)) # matplot saves click coordinates in x and y of the plot - ax.transData.transform ransforms them into display coordinates (pixel) for higher precision of assignment
-            distances = []
-            for p in pts_all: # iterates through each point
-                point_disp = ax.transData.transform((p[0], p[1])) # transforms each point coordinates into display coordinates
-                d = np.hypot(click_disp[0] - point_disp[0], click_disp[1] - point_disp[1]) # calculates distance between each point and the click
-                distances.append(d) 
-            distances = np.array(distances)
-            if len(distances) == 0: # if no points exists, return
-                return
-            i = np.argmin(distances) # gives index of point with smallest distance to the click
-            threshold_pixels = 10  # changeable threshold for pixel distance to select point
-            if distances[i] < threshold_pixels: # if disnatce between point and click is lower than threshold, select it
-                sel = pts_all[i]  # (Distance, Depth, Index, Original color) - inforation about selected point
-                if sel[2] in markers: # checks if point is already selected as faulty
-                    markers[sel[2]].remove()
-                    del markers[sel[2]]
-                    if sel[2] in bad_indices: # if already selected as faulty, unselect
-                        bad_indices.remove(sel[2])
-                else: # if point was not selected before
-                    marker, = ax.plot(sel[0], sel[1], 'ro', markersize=5) # mark point with red
-                    markers[sel[2]] = marker # save selection in markers
-                    bad_indices.append(sel[2]) # add point to bad_indices list
-                fig.canvas.draw() # update plot
-        
-        # RectangleSelector-Callback: selects all points in rectangle
-        def onselect(eclick, erelease): # ecklick contains coordinate of click start - erelease coordinates of cklick release
+            click_disp = np.array(ax.transData.transform((event.xdata, event.ydata))) # transform click coordinates into pixel coordinates
+            pts_disp = ax.transData.transform(points_coords)
+            distances = np.linalg.norm(pts_disp - click_disp, axis=1) # calculate distance of click and plottet points
+            i = int(np.argmin(distances)) # smalles distance to next point
+            if distances[i] < 10: # if point wihtin 10 pixels
+                proj, depth, idx, _ = pts_all[i] 
+                if idx in markers: # if point was already selected - delete from markers dict an list of bad indices
+                    markers[idx].remove()
+                    del markers[idx]
+                    if idx in survey_bad_indices:
+                        survey_bad_indices.remove(idx)
+                else: # if points was not slected
+                    marker, = ax.plot(proj, depth, 'ro', markersize=8) # turn point red
+                    markers[idx] = marker # add to marked dict
+                    survey_bad_indices.append(idx) # save in list of faulty indices
+                fig.canvas.draw() # refresh the plot
+
+        # Rectangle selector event: toggle markers for selected points
+        def on_select(eclick, erelease): # ecklick contains coordinate of click start - erelease coordinates of cklick release
             x_min, x_max = sorted([eclick.xdata, erelease.xdata]) # extract coordinates of click and release
             y_min, y_max = sorted([eclick.ydata, erelease.ydata])
             for p in pts_all: # contains all points of current survey in (distance, depth, index, originalcolor)
@@ -154,37 +177,26 @@ def interactive_error_correction(
                     if p[2] in markers: # if index of point is already in markers remove selection and remove from list of bad indices
                         markers[p[2]].remove()
                         del markers[p[2]]
-                        if p[2] in bad_indices: 
-                            bad_indices.remove(p[2])
+                        if p[2] in survey_bad_indices:
+                            survey_bad_indices.remove(p[2])
                     else:
                         marker, = ax.plot(p[0], p[1], 'ro', markersize=8) # if not already selected - turn red and
                         markers[p[2]] = marker
-                        bad_indices.append(p[2]) # add to bad indices
-            fig.canvas.draw() # update figure
-        
-        # link and activate cklick and rectangle with mouse click
-        fig.canvas.mpl_connect('button_press_event', on_click) # when a mouse click on the plot gets detected on click gets activated
-        rect_selector = RectangleSelector(ax, onselect, useblit=True, # initalise rectangle selector in matplot
-                                        button=[1],          # left mouse click
-                                        minspanx=5, minspany=5,  # min size in pixels
-                                        spancoords='pixels',
-                                        interactive=True)
-        
-        plt.show()  # after closing the survey plot, the next one is shown
+                        survey_bad_indices.append(p[2]) # add to bad indices
+            fig.canvas.draw()
 
-    # After editing, df gets filtered with the indices
-    df_corrected = df.drop(bad_indices)
-    # the aritifcal boundary points get added again
-    df_corrected = pd.concat([df_corrected, boundary_points], ignore_index=True)
+        # Connect the click event and create a persistent RectangleSelector
+        fig.canvas.mpl_connect('button_press_event', on_click)
+        rs = RectangleSelector(ax, on_select, useblit=True, button=[1],
+                               minspanx=5, minspany=5, spancoords='pixels', interactive=True)
+        plt.show()
+        all_bad_indices.extend(survey_bad_indices)
 
-    # save new list with faulty points overriting the old one
-    df.loc[bad_indices].to_csv(FILTER_CSV, index=False)
-    print(f"{len(bad_indices)} points were removed.")  # print count of removed points
-
-
+    # Remove marked bad points and re-add boundary points
+    df_corrected = pd.concat([df.drop(all_bad_indices), boundary_points], ignore_index=True)
+    df.loc[all_bad_indices].to_csv(FILTER_CSV, index=False)
+    print(f"{len(all_bad_indices)} points were removed.")
     return df_corrected
-
-
 
 
 #########################################################################################################################################################

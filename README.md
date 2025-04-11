@@ -244,65 +244,46 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import RectangleSelector
 from tqdm import tqdm
 
+    input:
+        GeoDataFrame (filtered_gdf) containing preprocessed sonar depth data with the following columns:
+            - file_id: Identifier for each survey run. Points with the file_id "artificial_boundary_points" are automatically excluded from correction but re-included after processing. These should be placed at the end of the DataFrame to avoid index mismatches.
+            - Beam_type: Identifier for the measurement beam (e.g., VB, OB, SB, CB). If this column is missing or contains only a single unique value, all points are treated as vertical beams (VB).
+            - Longitude, Latitude: UTM 32N coordinates (in meters), used for calculating the along-track (X-axis) distance.
+            - Depth (m): Depth value in meters, plotted along the Y-axis (positive downward).
+        Optional: previously saved interactive_error_points.csv (typically located in output/multibeam/interactive_error/), containing a column "orig_index" with the original indices of faulty points.
 
-    input: csv-file containing the geodataframe with the preprocessed sonar data, containing at least the colloumns:
-            file_id: Identifier for each survey run. Points with the file_id "artificial_boundary_points" will be automatically excluded.
-                        All "artifical_boundary_points" should be by default from earlier processing be at the end of the list. Else problems with the indices could arise.
-            Beam_type: Identifier for the measurement beam (VB (Vertical Beam, Beam 1-4))
-            Longitude and Latitude: UTM32N coordinates (in meters) used to compute the along-track distance.
-            Depth (m): Depth in meters
-            optional: interactive_error_points.csv in (output/multibeam/interactive_error) with faulty points (has to contain column "orig_index" with original index of the points)
+    output:
+        - FILTER_CSV: A CSV file ("faulty_points.csv") containing the indices and full metadata of all manually marked faulty points.
+        - df_corrected: A filtered GeoDataFrame with all marked faulty points removed and boundary points restored.
 
-    output: FILTER_CSV: A CSV file containing the indices and all data as the original csv-file from all selected points
-            df_corrected: DataFrame with original data excluding all selected points
-
-    user variable: manual_overwrite
-                = True -> the manual correction plots will show, no matter if a csv (interactive_error_points.csv in output/multibeam/interactive_error) of faulty points already exists or not
-                = False -> if "interactive_error_points.csv" exists -> filtering will be applied - no plot shown
-                            if "interactive_error_points.csv" doesnt exist -> plots will be shown
+    user variable:
+        - manual_overwrite:
+            = True → The interactive plots will open regardless of whether a CSV of faulty points already exists. Previously marked points will be pre-selected for editing.
+            = False → If a CSV exists, the faulty points are automatically removed without showing plots. If no CSV exists, the interactive selection is initiated.
 
     Input Variables & Settings:
-            threshold_pixels (default: 10): The selection threshold in pixel units. A point is only toggled (selected/deselected) if the click is within this distance from it.
-            rectangle_selector_minspan (default: 5): The minimum span in pixels required for the rectangle selection to activate.
-            Interactive Selection Modes:
-                Click Selection: Clicking near a point toggles its selection. The nearest point is determined based on both x and y coordinates in display space.
-                Rectangle Selection: By dragging a rectangle over the plot, all points within that area are toggled.
-            Toggle Behavior: Clicking on an already marked point (or selecting it via rectangle) removes its selection.
+        - threshold_pixels (default: 10): Pixel distance within which a point is considered selectable by click.
+        - rectangle_selector_minspan (default: 5): Minimum pixel size for activating rectangle selection.
+        - Interactive Modes:
+            - Click Selection: Click near a point to toggle its selection (mark/unmark as faulty).
+            - Rectangle Selection: Click and drag to select or deselect all points within the rectangle.
+            - Toggle Behavior: Re-clicking or re-selecting a previously marked point removes the marker.
+
 
         functionality:
-            This tool provides a manual error-correction for sonar measurment points via an interactive Matplotlib window. One figure per survey file gets shown. Points can be selected by clicking or click and drag to select multiple points wihtin a rectangle. Selected points are marked as red. By selecting a point a again, it gets unselected. The plot shows all Beam-Types in different colors . On the X-axis this distance between following point in meters is shown. On the Y-axis the Depth in m ist shown, starting at 0m (waterlevel).
-                Initialization:
-                    Upon startup, the tool checks if manual_overwrite=True/False.If a CSV file (interactive_error_correction.csv) with previously marked faulty points exists and manual_overwrite=False, those points are automatically removed from the dataset, after removing artifical boundary points first, and adiing them back in after.Further interactive filtering is skipped.
-                    If no FILTER_CSV exists, the tool reads the DATA_FILE, excludes any points with the file_id "artificial_boundary_points" and saves them seperately, so they wont get processed in error correction.
-                    If manual_overwrite =True the interactive error correction starts with or without existing "interactive_error_points.csv". If it exists the faulty points are moved to loaded_bad and shown as selcted in the plots for further editing.
-                Data Segmentation & Plotting:
-                    The data is segmented by each unique survey run (file_id).
-                    For each survey run, the tool computes the cumulative along-track distance using the UTM32N coordinates (Longitude, Latitude) to serve as the x-axis.
-                    Scatter plots are generated (without connecting lines) where each Beam_type is displayed in a distinct color.
-                    The y-axis is configured so that the water surface (0 m) is at the top and the deepest measurement is extended by a 0.5 m buffer (i.e., y-limit is set from min_depth – 0.5 to 0).
-                Interactive Point Selection:
-                    Click Selection:
-                        The tool listens for click events. It converts the click position into display (pixel) coordinates and calculates the distance to each point.
-                        If the nearest point is within the threshold (e.g., 10 pixels), its selection state is toggled (red marker is added or removed).
-                    Rectangle Selection:
-                        A RectangleSelector is enabled. By dragging a rectangle over the plot, all points within that defined area are toggled (i.e., marked as faulty if unmarked, or unmarked if already selected).
-                    Finalization:
-                         After all survey runs have been reviewed (each plot is closed to proceed to the next), the tool saves the indices of all marked (faulty) points to interactive_error_points.csv. If it already exists the old file will be overwritten.
-                         The faulty points are removed from the dataset, the artifical_boundary_points are added to the dataset again and the resulting filtered dataset is then ready for further processing
+    This function enables manual inspection and correction of sonar depth measurements through interactive plotting using Matplotlib. For each individual survey run, identified by its file_id, a dedicated plot window is opened to allow visual evaluation of the recorded points. The plot displays all beam types using distinct colors, with along-track distance (in meters) on the X-axis and depth (in meters) on the Y-axis, where 0 meters (representing the water surface) is at the top of the plot.
+
+    Upon execution, the function first checks whether a CSV file containing previously marked faulty points exists. If the manual_overwrite parameter is set to False and such a file is found, the listed points are immediately removed from the dataset, and no plot is displayed. If manual_overwrite is True, or if no file exists, the function proceeds to open the interactive plots and initialize the selection interface. Points identified as "artificial_boundary_points" are temporarily removed from the dataset before the correction begins and are re-added once the process is complete.
+
+    For each survey run, the cumulative track distance is computed based on UTM32N coordinates (stored in the Longitude and Latitude columns) using Euclidean distances between successive VB (vertical beam) points. If only one beam type is present in the dataset or if the Beam_type column is missing, all points are treated as VB, and their position along the track is determined solely through cumulative distance. In this simplified case, no spatial projection is necessary.
+
+    In contrast, when multiple beam types are available, the vertical beam points are used to define the actual survey track. All other beam types (e.g., side or off-center beams) are then projected orthogonally onto a local segment of this VB-defined track. This segment is centered around the current point and includes a configurable number of VB points before and after the current index. The projection is calculated using Shapely’s LineString.project() method, ensuring that each point is positioned accurately along the actual track path, even in cases of turning maneuvers or overlapping tracks.
+
+    During the interactive correction phase, users can click near individual points to toggle their selection status. A point is only affected if the click occurs within a specified pixel threshold. Alternatively, users can click and drag to define a rectangle and select or deselect all points within that region. Points marked as faulty are highlighted with a red marker. Previously selected points can be deselected by clicking or re-selecting them.
+
+    After reviewing all surveys, the user closes the plots, and the selected faulty points are saved to a CSV file (faulty_points.csv). These points are then removed from the dataset, and the previously separated artificial boundary points are appended again. The resulting cleaned dataset is returned and can be used for further steps in the sonar processing workflow, such as gridding, interpolation, or mapping.
 
     
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 Functions of QC_closepoints:
