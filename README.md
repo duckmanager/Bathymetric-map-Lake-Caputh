@@ -143,18 +143,17 @@ create_multibeam_points
 
 
 generate_boundary_points
-    input: data_dir - containing folder 'shp_files' with shp_file of studyed area
-                    - containing folder 'outline' with .csv with depth of all edge points measured (They dont have to cover all around the water body)
-                                        .csv has to contain for each point: [N] and [E] /y and x in ETRS89 / UTM zone 33N, [Depth (m)], [Date] - Date of edge point measuring (only one Date is possible) 
+    input: shp_data_dir – directory containing the shapefile of the studied waterbody
+            point_data_dir – directory containing .csv file (no other .csv files) with measured depth values along the shoreline (e.g., in subfolder outline). The CSV file must contain the following columns: [Longitude], [Latitude] – coordinates in ETRS89 / UTM Zone 33N, [Depth (m)] – measured water depth at the lakeside, and [Date] – date of measurement (only one unique date is allowed) format (MM/DD/YYYY).
+            edge_points_zero – if True, skips all interpolation and assigns zero depth to all edge points.
 
-    output: boundary_gdf: GeoDataFrame (epsg:25833): [geometry]- point geometry of each point, [Longitude], [Latitude] - x/y of each point in EPSG:25833, [Depth (m)] - Depth of each point, [file_id] = "artificial_boundary_points", [Date] - day of point measurement
+    output: boundary_gdf – GeoDataFrame (EPSG:25833) containing: [geometry] – point geometry, [Longitude], [Latitude] – X/Y coordinates, [Depth (m)] – water depth value, [file_id] – "artificial_boundary_points", and [Date] – date of depth assignment.
 
-    input variables: spacing: distance between each edge point, in m (default is 1)
+    input variables: spacing – distance between generated edge points in meters (default: 1)
                     interpoaltion_distance: distance between measured depth of edge point, within they get connected, in m (default is 150)
                     extrapolation_distance: distance to extrapolate measured depth to the side without measured point within interpolation_distance, in m (default is 15)
 
-    functionality: creates artifical edge points for enhanced interpoaltion precision at the edges. Only interpolates near measured points.
-    Creates points with "spacing" distance between on the outline of -shp file of the water body. Uses cKDTress for neighor identification. Connects each measured Depth point with the closest edge point. For measured points within "interpoaltion_distance" to each other, each point in between gets a depth assigned. The Depth gets linearly interpolated by the difference in depth between the measured points and the number of artifical edge points between. If no meassured point is within "interpolation_distance", edge points ~ within "extrapolation_distance" get assigend the same depth as last measured. All edge points without depth assigned get discraded.
+    functionality: Generates evenly spaced artificial shoreline points along the polygon outline of the waterbody with the specified spacing. If edge_points_zero is set to True, all points receive a fixed depth of 0 m and no measured data is used. Otherwise, each measured point is matched to its nearest generated shoreline point using geometric distance. If two measured points are within interpolation_distance, all intermediate points are assigned linearly interpolated depth values. If no second measured point is within reach, the depth is locally extrapolated over a distance of up to extrapolation_distance. All shoreline points without assigned depth are removed from the output.
 
 
 

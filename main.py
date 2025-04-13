@@ -71,6 +71,14 @@ def get_args():
         help="Reference day for water level correction in format: m/d/y. (optional)",
     )
 
+    ####### edge points
+
+    arg_par.add_argument(
+        "--edge_points_zero",
+        action="store_true",
+        help="Set this flag to assign 0m depth along the entire lakeside (no manual measurements used)",
+    )
+
     ####### creating validation dataset
    
     arg_par.add_argument(
@@ -81,7 +89,7 @@ def get_args():
 
     arg_par.add_argument(
         "--validation_sample_rate",
-        default=7,
+        default=3,
         type=int,
         help="Every n-th point gets added to the validation dataset.",
     )
@@ -203,7 +211,7 @@ if __name__ == "__main__":
     multipoint_gdf = create_multibeam_points(interpolated_sum)
 
     logging.info("creating lake outlines")
-    boundary_gdf = generate_boundary_points(args.lake_shp_dir, args.point_data_dir)
+    boundary_gdf = generate_boundary_points(args.lake_shp_dir, args.point_data_dir, args.edge_points_zero)
 
     logging.info("merging boundary points and measurment points")
     gdf_combined = combine_multibeam_edge(multipoint_gdf, boundary_gdf)
