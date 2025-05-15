@@ -98,6 +98,8 @@ tqdm
 matplotlib
 
 
+![alt text](image-1.png)
+
 create_dataframe
     input: data_dir: path of data
                                 [data has to contain: .mat, .sum of each sample track to analyse with the same file names, as well as .txt of each ecternal GPS per day (at the moment is has to be one external GPS file per sampling day)]
