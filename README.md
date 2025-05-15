@@ -1,68 +1,101 @@
-## Data
-### .mat files
-```
-{
-    ...,
-    "System" = {
-        "Heading" = array of float: degree of where the measuring unit is heading,
-        "True_North_ADP_Heading" = array of float: degree of where the compute unit is heading with correction for geographic north,
-        ...,
-    },
-    "Summary" = {
-        "Boat_Vel" = array of arrays of four floats: first index seems to be boat velocity in m/s,
-        "Boat Direction (deg)" = array of float: degree of where the measuring unit is heading in compass degreees /or the azimuth,
-        ...,
-    }
-    "BottomTrack" = {
-        "VB_Depth" = array of float: depth of vertical beam in m,
-        "BT_Depth" = array of float: depth of bottom track (mix of all four outer beams),
-        "BT_Vel" = array of arrays of four floats: east, north, up, difference,
-        "BT_Beam_Depth" = array of arrays of four floats: depth per (outer) beam in m/s, 
-        "BT_Frequency" = array of float: frequency,
-        "Units" = dict of units
-    }
+General Informations:
 
-    {
-    "RawGPSData" = {
-        "GgaUTC" = array of decimal second step UTC times, always starting with the same time?
-                        pobably the start of UTC in GPS - maybe the cause of the problems or the solutions why its not a problem?
+# This script processes data from the Riversurveyor M9 echo-sounder to optimize for bathymetric mapping. #
+No interpolation is included.
+The survey is expected to be done with an additional RTK-GNSS (specifically the Pro Nivo PNR21) but can be adapted to work with a different or without a seperate GNSS.
+The RiverSurveyor M9 (RS) data is expected as the result of the RiverSurveyor Live-Software Export in matlab and ASCII format.
+
+(all functions are expected to be in the same folder)
+
+General functionality, combined in main.py:
+The echo-sounder data gets linked with the GNSS data and is corrected for faulty data and differences in the recording times (load_data.py).
+--
+To achieve maximum data richness, each depth-beam of the RS gets geolocated individually instead of using is combined in "Bottom Track". (multibeam_location.py)
+--
+In order to optimally include the bank areas of the watercourse in the interpolation, measurements of the bank can be entered, from which points along the bank are created.
+Alternativly an general depth of 0m at the bank can be assumed.
+Waterlevel changes from different survey dates can be corrected in the data, based on waterlevel measurements (survey_adjustments.py)
+--
+To optimal filter the echo sounder data for faulty measurements, two detection variants are implemented:
+The autoamtic filtering, checks eahc point based on the mean of all sourrounding points, based on user defined variables. (automatic_detection.py)
+--
+The manual filtering opens each survey as a individual plot, for the user to mark or unmark faulty points by hand. (manual_correction.py)
+In order to validate the interpolation quality, points can be filtered out at regular variable intervals to create a validation and interpolation data set.
 
 
-    }
+Additional functionalitys not included in main.py:
+A themperature profile and average temperature for the water column can be calculated based on manual temperature measuremnts  e.g. to use for temperature correction in the RiverSurveyor Live Software. (temperature_plot.py)
 
+--
 
+To validate the measuring onsistency of the RS-data, close points within a variable distance ase well as with a time and space difference get compared and the differences displayed in boxplots. (QC_point_consistency.py)
 
-    }
-}
+------------------------------------------------------------------------
+more precise descriptions below
+------------------------------------------------------------------------
+flags for data paths and variables can be found at the beginning of main.py and the seperate skripts.
+All CSV and shp files must be stored individually in separate folders, i.e. without other files of the same type.
+All data needed for full functionality:
 
-
-Functions of multibeam_processing
-  
-    general informations:
-    Combine sonar and GPS data, optimize data quality and add seperatly measured edge points to create a dataset usable in GIS-interpolations.
-
-    basic starter guide for Riversurveyor M9 and ProNivo PNR21
-    Put ASCII and matlab export (has to contain correct date) of each survey in /data
-    Put the .txt of ProNivo PNR21 for each measurment day in /data
-
-    - waterbody.shp in data/shp_files
-    - edge_depth_measurements.csv with edge measuremnts (in m) in data/outline
-
-    - waterlevel.csv with ["date"],["waterlevel"] - (youngest waterlevel cant be older than earliest survey, oldest waterlevel cant be younger than last survey), in data/waterlevel
-    - variables for automatic filtering
+### Temperature Stratification
+- **File type**: `.csv`
+- **Structure**:
+  - One column named `Depth`
+  - Sequentially numbered columns for each measurement location on a given day, containing temperatures at corresponding depths
+  - One file per measurement day and function run
+  - Filename not relevant
+---
+### GNSS Data
+- **File type**: `.txt`
+- **Structure**:
+  - 1 Hz `Bestposa` and `GPZDA` records
+  - All files should be placed in one folder
+  - Filename is not relevant
+---
+### Echo Sounder Data
+- **File types**: `.mat` and `.sum` (Export by matlab and ASCII-format)
+- **Structure**:
+  - Exported data from RSL software (MATLAB and ASCII format)
+  - All files should be placed in one folder
+  - Filenames of a single recording must be identical, otherwise filenames are not relevant
+---
+### Lake Outline
+- **File type**: `.shp`
+- **Structure**:
+  - Shapefile of the waterbody outline
+  - Filename is not relevant
+---
+### Shoreline Measurements
+- **File type**: `.csv`
+- **Structure**:
+  - Measurement points from manual shoreline recordings — all recorded on the same day or adjusted accordingly
+  - Filename is not relevant
+  - For each measurement point:
+    - `Longitude`, `Latitude`, `Depth (m)`, `Date` (Format: MM/DD/YYYY)
+---
+### Water Level Measurements
+- **File type**: `.csv`
+- **Structure**:
+  - File must contain water level data for at least the first and last measurement day
+  - Filename is not relevant
+  - For each measurement day:
+    - `date` (Format: DD/MM/YYYY), `waterlevel` (in m)
 
 
 required packages:
-- pathlib
-- pandas
-- geopandas
-- shapely.geometry
-- numpy
-- pymatreader
-- datetime
-- scipy.spatial
-- collections
-- tqdm
+argparse
+pathlib
+logging
+pandas
+geopandas
+shapely
+numpy
+pymatreader
+datetime
+scipy
+collections
+tqdm
+matplotlib
 
 
 create_dataframe
@@ -107,7 +140,7 @@ get_gps_dataframe
     input: data_dir :path of data including the .txt files with external GPS data. This cant contain other .txt files than the external GPS. Only one external GPS file per day can be processed. May need to combine them amnually. Take care of keeping the BESTPOSA and GPZDA order!
                 external GPS: external GPS - PNR21 with BESTPOSA and GPZDA at 1Hz sampling rate
 
-    output: gps_geodf_projected : GeoDataFrame with date, utc, lat -in WGS84, long  -in WGS84,hgt above mean sea level (meters), DOP (lat), DOP (lon), VDOP and pointgeometry - in UTM 32N - for each second of the external GPS turned on
+    output: gps_geodf_projected : GeoDataFrame with date, utc, lat -in WGS84, long  -in WGS84,hgt above mean sea level (meters), DOP (lat), DOP (lon), VDOP and pointgeometry - in UTM 33N - for each second of the external GPS turned on
 
     functionality: iterates through the .txt files in data_dir. 
     Iterates through each file and saves longitude and latitude in WGS84 from BESTPOSA and couples with date and utc from next following GPZDA. This assumes that first BESTPOSA comes before first GPZDA and they keep the same order. These samples are saved into a DataFrame, converted into a GeoDataFrame and projected from WGS84 to EPSG:25833.
@@ -247,7 +280,7 @@ from tqdm import tqdm
         GeoDataFrame (filtered_gdf) containing preprocessed sonar depth data with the following columns:
             - file_id: Identifier for each survey run. Points with the file_id "artificial_boundary_points" are automatically excluded from correction but re-included after processing. These should be placed at the end of the DataFrame to avoid index mismatches.
             - Beam_type: Identifier for the measurement beam (e.g., VB, OB, SB, CB). If this column is missing or contains only a single unique value, all points are treated as vertical beams (VB).
-            - Longitude, Latitude: UTM 32N coordinates (in meters), used for calculating the along-track (X-axis) distance.
+            - Longitude, Latitude: UTM 33N coordinates (in meters), used for calculating the along-track (X-axis) distance.
             - Depth (m): Depth value in meters, plotted along the Y-axis (positive downward).
         Optional: previously saved interactive_error_points.csv (typically located in output/multibeam/interactive_error/), containing a column "orig_index" with the original indices of faulty points.
 
@@ -274,7 +307,7 @@ from tqdm import tqdm
 
     Upon execution, the function first checks whether a CSV file containing previously marked faulty points exists. If the manual_overwrite parameter is set to False and such a file is found, the listed points are immediately removed from the dataset, and no plot is displayed. If manual_overwrite is True, or if no file exists, the function proceeds to open the interactive plots and initialize the selection interface. Points identified as "artificial_boundary_points" are temporarily removed from the dataset before the correction begins and are re-added once the process is complete.
 
-    For each survey run, the cumulative track distance is computed based on UTM32N coordinates (stored in the Longitude and Latitude columns) using Euclidean distances between successive VB (vertical beam) points. If only one beam type is present in the dataset or if the Beam_type column is missing, all points are treated as VB, and their position along the track is determined solely through cumulative distance. In this simplified case, no spatial projection is necessary.
+    For each survey run, the cumulative track distance is computed based on UTM33N coordinates (stored in the Longitude and Latitude columns) using Euclidean distances between successive VB (vertical beam) points. If only one beam type is present in the dataset or if the Beam_type column is missing, all points are treated as VB, and their position along the track is determined solely through cumulative distance. In this simplified case, no spatial projection is necessary.
 
     In contrast, when multiple beam types are available, the vertical beam points are used to define the actual survey track. All other beam types (e.g., side or off-center beams) are then projected orthogonally onto a local segment of this VB-defined track. This segment is centered around the current point and includes a configurable number of VB points before and after the current index. The projection is calculated using Shapely’s LineString.project() method, ensuring that each point is positioned accurately along the actual track path, even in cases of turning maneuvers or overlapping tracks.
 

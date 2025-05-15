@@ -126,7 +126,7 @@ for csv_file in data_folder.glob("*.csv"):
     plt.title(f"{csv_file.stem} Temperaturschichtung")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(output_folder / f"{csv_file.stem}_temperaturplot.png", dpi=300)
+    plt.savefig(output_folder / f"{csv_file.stem}_temperatureplot.png", dpi=300)
     plt.clf()
 
 print("finished")

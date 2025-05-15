@@ -29,11 +29,15 @@ def generate_boundary_points(shp_data_dir:Path, point_data_dir:Path, edge_points
 
 
     spacing = 1  # distance between artifical edge points in m (CRS EPSG:25833)
-    interpolation_distance = 150  # distance to cover between measured points
+    interpolation_distance = 200  # distance to cover between measured points
     extrapolation_distance = 15  # distance to extrapolate measured depth to the side without measured point within interpolation_distance
 
     # load lake outline
-    lake_boundary = gpd.read_file(shp_data_dir / "waterbody.shp").to_crs("EPSG:25833")
+    shp_files = list(shp_data_dir.glob("*.shp"))
+    if len(shp_files) != 1:
+        raise ValueError(f"Expected exactly one shapefile in {shp_data_dir}, found {len(shp_files)}")
+
+    lake_boundary = gpd.read_file(shp_files[0]).to_crs("EPSG:25833")
     boundary = lake_boundary.unary_union.exterior
 
     # load measured edge points - only one csv should be present in the data dir

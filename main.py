@@ -98,6 +98,7 @@ def get_args():
     # PATHS
     ######################################
     
+    # Note: Each folder should contain only one of the specific filetypes. 
     ####### input data paths
 
     arg_par.add_argument(

@@ -470,12 +470,12 @@ def main():
 
     logging.info("saving data")
     data_output_dir = args.output_data_dir
-    used_points_intersections_gdf.to_csv(data_output_dir/"QC_intersections_used_points.csv", index=False)
-    used_points_closep_gdf.to_csv(data_output_dir/"QC_closepoints_used_points.csv", index=False)
+    used_points_intersections_gdf.to_csv(data_output_dir/"QC_time_n_space_diff_used_points.csv", index=False)
+    used_points_closep_gdf.to_csv(data_output_dir/"QC_space_diff_used_points.csv", index=False)
     intersec_plot.savefig(data_output_dir/ "boxplot_QC_time_n_space_diff.png", dpi=300, bbox_inches="tight")
     closep_plot.savefig(data_output_dir/ "boxplot_QC_space_diff.png", dpi=300, bbox_inches="tight")
 
-    logging.info("The Quality Assessment is done!")
+    logging.info("The quality assessment is done!")
 
 
 main()

@@ -63,8 +63,13 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     # transformation of all Date rows to datetime format
     gdf["Date_dt"] = pd.to_datetime(gdf["Date"], format="%m/%d/%Y")
 
-    # 3.load CSV with measured waterlevels (CSV-Date Format: DD/MM/YYYY) and Datetransformation
-    wl = pd.read_csv(data_dir / "waterlevel.csv", sep=";")
+    # load CSV with measured waterlevels (CSV-Date Format: DD/MM/YYYY) and Datetransformation
+    csv_files = list(data_dir.glob("*.csv"))
+    if len(csv_files) != 1:
+        raise ValueError(f"Expected exactly one CSV file in {data_dir}, found {len(csv_files)}")
+    for csv_file in csv_files:
+        wl = pd.read_csv(csv_file, sep=";")
+        
     wl["date_dt"] = pd.to_datetime(wl["date"], dayfirst=True, errors="raise")
     wl = wl.sort_values("date_dt")
 
@@ -97,7 +102,7 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     # save original depth data
     gdf["Depth_uncorrected (m)"] = gdf["Depth (m)"]
 
-    # correct depth data if !=0
+    # correct depth data if depth !=0
     # Formel:corrected = original - (level_measured - level_reference)
     corr = gdf["Depth (m)"].where(
         gdf["Depth (m)"] == 0, gdf["Depth (m)"] - (gdf["waterlevel"] - ref_wl)
