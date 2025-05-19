@@ -362,6 +362,9 @@ def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
     new_labels = [format_label(col) for col in depth_diff_df.columns]
     ax.set_xticklabels(new_labels, rotation=45, ha='right')
 
+    # Add horizontal gridlines at every y-tick
+    ax.yaxis.grid(True, linestyle='-', color='lightgray', linewidth=0.8)
+
     # Determine vertical position for annotation text
     y_pos = max(depth_diff_df.max(skipna=True)) * 1.2 if not depth_diff_df.isna().all().all() else 1
 
@@ -407,13 +410,11 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
 
     print(stats_df)
 
-    # Erstelle Boxplot
     # Create boxplot figure
     fig, ax = plt.subplots(figsize=(12, 6))
     box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns],
                      labels=depth_diff_df.columns, patch_artist=True)
 
-    # Format der Achsenbeschriftung ändern: YYYY-MM-DD-YYYY-MM-DD → dd.mm-dd.mm.yy
     # Format x-axis labels: from YYYY-MM-DD-YYYY-MM-DD to dd.mm-dd.mm.yy
     def format_label(label):
         parts = label.split('-')
@@ -423,11 +424,12 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
     new_labels = [format_label(col) for col in depth_diff_df.columns]
     ax.set_xticklabels(new_labels, rotation=45, ha='right')
 
-    # Höhe für Textanzeigen berechnen
+    # Add horizontal gridlines at every y-tick
+    ax.yaxis.grid(True, linestyle='-', color='lightgray', linewidth=0.8)
+
     # Determine vertical position for annotation text
     y_pos = max(depth_diff_df.max(skipna=True)) * 1.2 if not depth_diff_df.isna().all().all() else 1
 
-    # Zeige n und Mittelwert an
     # Annotate each box with n (number of values) and mean
     for i, col in enumerate(depth_diff_df.columns, start=1):
         n_points = depth_diff_df[col].count()
@@ -435,7 +437,7 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
         ax.text(i, y_pos, f"n={n_points}", ha='center', va='bottom', fontsize=10, fontweight='bold')
         ax.text(i, y_pos * 0.97, f"Ø={mean_val:.2f}", ha='center', va='top', fontsize=9, color='black')
 
-    # Achsentitel
+    # axis titles
     ax.set_xlabel("Daten verglichener Punkte")  # Compared point dates
     ax.set_ylabel("Tiefenunterschied (m)")  # Depth difference
     ax.set_title("Tiefenunterschiede naheliegender Punkte")  # Depth differences of close points
