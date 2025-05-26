@@ -1,4 +1,4 @@
-# Documentation for QC_point_consistency script#
+# Documentation for QC_point_consistency script
 
     Used to determine the Depth difference of close points and show their distribution grouped by dates.
 
