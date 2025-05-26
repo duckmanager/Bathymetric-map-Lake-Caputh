@@ -2,14 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import logging
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 """
-This script processes temperature-depth profiles from temperature-depth csv,
+This script processes temperature-depth profiles from a temperature-depth CSV-file,
 interpolates the data at a fixed depth resolution, and plots all
 individual profiles along with their mean temperature curve.
 
@@ -31,7 +30,7 @@ def get_args():
         "-dd",
         default=Path().joinpath("output", "temperature_plot"),
         type=Path,
-        help="Path to folder with csv of temperature measurments.",
+        help="Path to folder with CSV of temperature measurments.",
     )
 
     arg_par.add_argument(
@@ -68,7 +67,7 @@ for csv_file in data_folder.glob("*.csv"):
         print("Depth column not found")
         continue
 
-    # prepare interpoaltion raster
+    # prepare interpolation raster
     depths = df["Depth"]
     temp_cols = df.columns.drop("Depth")
     max_depth = depths.max()

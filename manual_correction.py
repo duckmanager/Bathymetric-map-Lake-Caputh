@@ -14,7 +14,7 @@ def interactive_error_correction(
         faulty_points_dir: Path,
         filtered_gdf: gpd.GeoDataFrame,
         manual_overwrite: bool = True,
-        vb_window_size: int = 3  # Number of VB points before and after for local projection
+        vb_window_size: int = 3  # Number of VB points before and after sidebeam-point to specify window for local projection on route
     ):
     """
     Manually inspect and remove faulty sonar depth points using interactive plotting.
@@ -23,6 +23,7 @@ def interactive_error_correction(
     Faulty points can be selected via single clicks or rectangular selection. Selected points are saved to a CSV and removed 
     from the returned dataset. Previously saved selections are either applied automatically or preloaded into the plots for further editing.
 
+    VB are used to determine the cumulative travel distance (x-axis). Other beams get projected on the nearest route part recorded at roughly the same time.
     If only one beam type is present, or if the 'Beam_type' column is missing, all points are treated as vertical beams (VB), 
     and their position is calculated using cumulative distance along the survey track. No projection is performed in this case.
 
@@ -84,7 +85,7 @@ def interactive_error_correction(
             vb_df = sub_df[sub_df['Beam_type'] == "VB"].copy()
 
         if vb_df.empty:
-            print(f"Survey {survey_id}: No VB points found. Skipping.")
+            print(f"Survey {survey_id}: No points found. Skipping.")
             continue
 
         # Compute cumulative distances for VB points
@@ -106,11 +107,11 @@ def interactive_error_correction(
         # Process each beam type (if only one type, projection is just cumulative distance)
         for color, beam in zip(colors, beams):
             beam_df = sub_df if is_single_beam else sub_df[sub_df['Beam_type'] == beam].copy()
-            proj_list = [] # list for eahc calculate x-axis value
+            proj_list = [] # list for each calculated x-axis value
             for idx, row in beam_df.iterrows(): # iterating over all points with beam type
                 x, y = row['Longitude'], row['Latitude']
                 current_pt = Point(x, y) # create shapely point to project on a line later
-                # In single-beam case or if beam=="VB": use cumulative distance directly.
+                # In single-beam case or if all beams are VB use cumulative distance directly.
                 if is_single_beam or (('Beam_type' in sub_df.columns) and beam == "VB"):
                     proj_val = vb_df.loc[idx, 'cum_dist']
                 else: # For non-VB beams in multi-beam scenario, project onto local VB segment.
@@ -149,12 +150,12 @@ def interactive_error_correction(
 
         # Single click event: toggle marker
         def on_click(event):
-            if event.inaxes != ax or event.xdata is None or event.ydata is None: # return if click isout of the plot area
+            if event.inaxes != ax or event.xdata is None or event.ydata is None: # return if click is out of the plot area
                 return
             click_disp = np.array(ax.transData.transform((event.xdata, event.ydata))) # transform click coordinates into pixel coordinates
             pts_disp = ax.transData.transform(points_coords)
             distances = np.linalg.norm(pts_disp - click_disp, axis=1) # calculate distance of click and plottet points
-            i = int(np.argmin(distances)) # smalles distance to next point
+            i = int(np.argmin(distances)) # smallest distance to next point
             if distances[i] < 10: # if point wihtin 10 pixels
                 proj, depth, idx, _ = pts_all[i] 
                 if idx in markers: # if point was already selected - delete from markers dict an list of bad indices
@@ -182,7 +183,7 @@ def interactive_error_correction(
                     else:
                         marker, = ax.plot(p[0], p[1], 'ro', markersize=8) # if not already selected - turn red and
                         markers[p[2]] = marker
-                        survey_bad_indices.append(p[2]) # add to bad indices
+                        survey_bad_indices.append(p[2]) # add to faulty indices
             fig.canvas.draw()
 
         # Connect the click event and create a persistent RectangleSelector

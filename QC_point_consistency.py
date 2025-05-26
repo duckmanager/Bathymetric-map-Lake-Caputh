@@ -91,8 +91,9 @@ def calculate_depth_differences_intersections(transformed_gdf,
     """
     Calculate depth differences between spatially close and temporally distinct points.
 
-    Identifies all neighboring sonar measurement points within a given spatial range, filters them by a minimum time difference, and calculates depth differences between valid survey day pairs. 
-    Designed to assess consistency across intersecting or overlapping survey tracks.
+    Identifies all neighboring sonar measurement points within a given spatial range, filters them by a minimal time difference, and calculates depth differences between valid pairs.
+    The depth difference is calculated as:  **earlier depth − later depth**. Artificial boundary points (`file_id == "artificial_boundary_points"`) are excluded entirely from the comparison.
+    Designed to provide a basis for evaluating survey consistency and detecting potential vertical offsets between repeated measurements in overlapping areas.
     All results are grouped by the corresponding date pairs.
 
     args:
@@ -103,25 +104,11 @@ def calculate_depth_differences_intersections(transformed_gdf,
     returns:
         depth_diff_df: DataFrame - depth differences grouped by survey date combinations (columns named as 'YYYY-MM-DD-YYYY-MM-DD')
         used_points_gdf: GeoDataFrame - all points used in the pairwise comparisons
-
-    functionality:
-        The function compares depth values between points that lie within a specified spatial distance (`max_distance`, default: 0.2 m) and have a minimum time difference (`min_time_diff`, default: 5 minutes).
-        This ensures only crossings or overlaps between independent survey passes are considered, avoiding consecutive point comparisons from the same track.
-        
-        A cKDTree is used for efficient neighbor search. For each point, only neighbors recorded at a later time are used to avoid double-counting (i.e., a-b and b-a). The depth difference is calculated as:  
-        **earlier depth − later depth**.  
-        All results are grouped by the date pair on which the two compared points were recorded (e.g., '2025-01-12–2025-01-13') and returned as a wide-format DataFrame.
-
-        Artificial boundary points (`file_id == "artificial_boundary_points"`) are excluded entirely from the comparison.
-
-        This method provides a basis for evaluating survey consistency and detecting potential vertical offsets between repeated measurements in overlapping areas.
     """
     
     # Check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
-        raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
-
-
+        raise ValueError("transformed_gdf must be GeoDataFrame!")
 
     # remove all "artifical edge points"
     transformed_gdf = transformed_gdf[transformed_gdf['file_id'] != "artificial_boundary_points"].copy()
@@ -133,7 +120,7 @@ def calculate_depth_differences_intersections(transformed_gdf,
     # Convert Date/Time to pdandas datetime - sonar internal Date and time being used, not backed up by GPS time!
     transformed_gdf['DateTime'] = pd.to_datetime(transformed_gdf['Date/Time'], format='%m/%d/%Y %I:%M:%S %p', errors='coerce')
     
-    # Check for daulty timestamps
+    # Check for faulty timestamps
     if transformed_gdf['DateTime'].isna().any():
         raise ValueError("Error with Date/Time timestamps! Date/Time is empty or conversion to pd.datetime failed")
 
@@ -211,9 +198,12 @@ def calculate_depth_differences_close_points(transformed_gdf, max_distance:float
     """
     Calculate depth differences between spatially close points, regardless of time difference.
 
-    Identifies neighboring sonar measurement points within a specified spatial distance and computes pairwise depth differences. Unlike intersection-only methods, this includes both consecutive points from the same survey and overlapping points from different days. 
-    All results are grouped by the corresponding date pairs.
+    Identifies neighboring sonar measurement points within a specified spatial distance and computes pairwise depth differences. Unlike intersection-only methods, this includes both consecutive points from the same survey (within spacial distance) and overlapping points from different days. 
+    All results are grouped by the corresponding date pairs. The depth difference is always calculated as:  **earlier depth − later depth**.
+    Artificial boundary points (`file_id == "artificial_boundary_points"`) are excluded from both the calculations and the output.
 
+    This method is particuallry designed for evaluating local noise or inconsistencies within and between survey passes.
+    
     args:
         transformed_gdf: GeoDataFrame - sonar depth data containing coordinates, timestamps, and [Depth (m)] column
         max_distance: float (default: 0.2) - maximum spatial distance (in meters) between two points to be considered neighbors
@@ -221,27 +211,15 @@ def calculate_depth_differences_close_points(transformed_gdf, max_distance:float
     returns:
         depth_diff_df: DataFrame - depth differences grouped by date combinations, one column per date pair in format 'YYYY-MM-DD–YYYY-MM-DD'
         used_points_gdf: GeoDataFrame - all points that were used in the pairwise depth comparisons
-
-    functionality:
-        This function analyzes local consistency within sonar data by calculating depth differences between points located within `max_distance` of one another.
-        It includes comparisons across different survey dates as well as within the same survey track. Unlike `calculate_depth_differences_intersections`, there is no minimum time difference requirement.
-
-        To avoid double-counting, only point pairs where one point was measured later than the other are considered (e.g., a–b, but not b–a). The depth difference is always calculated as:  
-        **earlier depth − later depth**.
-
-        Artificial boundary points (`file_id == "artificial_boundary_points"`) are excluded from both the calculations and the output.
-        
-        The function uses a `cKDTree` for efficient spatial neighbor searches and returns a table of grouped depth differences and a GeoDataFrame of all used points. 
-        This approach is particularly useful for evaluating local noise or inconsistencies within and between survey passes.
     """
 
     
     # Check for GeoDataFrame
     if not isinstance(transformed_gdf, gpd.GeoDataFrame):
-        raise ValueError("transformed_gdf muss ein GeoDataFrame sein!")
+        raise ValueError("transformed_gdf must be GeoDataFrame!")
 
 
-    # Entferne alle "artificial_boundary_points"
+    # remove all "artificial_boundary_points"
     transformed_gdf = transformed_gdf[transformed_gdf['file_id'] != "artificial_boundary_points"].copy()
 
     # check if data exists after filtering
@@ -285,7 +263,7 @@ def calculate_depth_differences_close_points(transformed_gdf, max_distance:float
         if not neighbors:
             continue  # skip if no neighbor exists
 
-        # Convert list of neigbor points to numpy-array
+        # Convert list of neighbor points to numpy-array
         neighbor_depths = depths[neighbors]
         neighbor_dates = dates[neighbors]
         neighbor_times = datetimes[neighbors]
@@ -294,10 +272,10 @@ def calculate_depth_differences_close_points(transformed_gdf, max_distance:float
         for neighbor_idx, match_depth, match_time, match_date in zip(neighbors, neighbor_depths, neighbor_times, neighbor_dates):
             # Only calculate earlier point - later point, switch for opposit
             if match_time > point_time:
-                depth_diff = point_depth - match_depth  # switch for later - erlier point!
+                depth_diff = point_depth - match_depth  # switch for later - earlier point!
                 earlier_date, later_date = point_date, match_date
             else:
-                depth_diff = match_depth - point_depth  # switch for later - erlier point!
+                depth_diff = match_depth - point_depth  # switch for later - earlier point!
                 earlier_date, later_date = match_date, point_date
 
 
@@ -318,12 +296,7 @@ def calculate_depth_differences_close_points(transformed_gdf, max_distance:float
 
 
 
-
-
-# mean and std of the depth differences
-
 ###############################################
-################################ change date format
 
 def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
 
@@ -337,7 +310,7 @@ def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
 
     returns:
         stats_df: DataFrame - statistical summary with 'Mean' and 'StdDev' for each date combination
-        box: matplotlib object - the generated boxplot object (for optional further use or saving)
+        box: matplotlib object - the generated boxplot object
     """
 
     # Compute basic statistics
@@ -346,12 +319,12 @@ def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
         'StdDev': depth_diff_df.std()
     })
 
-    print(stats_df)
+    # print(stats_df)
 
     # Create boxplot figure
     fig, ax = plt.subplots(figsize=(12, 6))
     box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns],
-                     labels=depth_diff_df.columns, patch_artist=True)
+                     tick_labels=depth_diff_df.columns, patch_artist=True)
 
     # Format x-axis labels: from YYYY-MM-DD-YYYY-MM-DD to dd.mm-dd.mm.yy
     def format_label(label):
@@ -399,7 +372,7 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
 
     returns:
         stats_df: DataFrame - statistical summary with 'Mean' and 'StdDev' for each date combination
-        box: matplotlib object - the generated boxplot object (for optional reuse or export)
+        box: matplotlib object - the generated boxplot object
     """
 
     # Compute basic statistics
@@ -408,12 +381,12 @@ def compute_statistics_closepoints(depth_diff_df:pd.DataFrame):
         'StdDev': depth_diff_df.std()
     })
 
-    print(stats_df)
+    # print(stats_df)
 
     # Create boxplot figure
     fig, ax = plt.subplots(figsize=(12, 6))
     box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns],
-                     labels=depth_diff_df.columns, patch_artist=True)
+                     tick_labels=depth_diff_df.columns, patch_artist=True)
 
     # Format x-axis labels: from YYYY-MM-DD-YYYY-MM-DD to dd.mm-dd.mm.yy
     def format_label(label):

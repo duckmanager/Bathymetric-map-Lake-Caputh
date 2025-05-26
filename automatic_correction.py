@@ -14,7 +14,7 @@ def detect_and_remove_faulty_depths(
     faulty_points_dir:Path,
     max_distance: int = 5,
     threshold: float = 0.5,
-    automatic_detection=True     # set True / False if autoamtic correction should be applied - if True existing csv with faulty depths will be overwritten
+    automatic_detection=True     # set True / False if autoamtic correction should be applied - !if True existing csv with faulty depths will be overwritten!
 ):
 
     """
@@ -37,7 +37,7 @@ def detect_and_remove_faulty_depths(
     if not isinstance(geodf_projected, gpd.GeoDataFrame):
         raise ValueError("transformed_gdf must be gdf!")
 
-        # if automatic_detection = False - return gpd unchanged
+        # if automatic_detection = False - return gdf unchanged
     if not automatic_detection:
         print("Skipping automatic detection of faulty depths")
         return geodf_projected, gpd.GeoDataFrame(
@@ -78,7 +78,7 @@ def detect_and_remove_faulty_depths(
         else:
             valid_indices.append(i)
 
-    # check for borderpoints marked as faulty - should be only used as reference, not filtering them
+    # check for edgepoints marked as faulty - should be only used as reference, not filtering them
     boundary_indices = [
         i
         for i in removed_indices

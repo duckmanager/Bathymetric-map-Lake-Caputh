@@ -7,15 +7,13 @@ import geopandas as gpd
 import numpy as np
 
 
-
-# turn depths negativ - maybe add correction for water fluctuation later
 def adjust_depths(com_gdf: gpd.GeoDataFrame):
 
     """
     Convert all depth values to negative for bathymetric representation.
 
     Ensures that all depth measurements are expressed as negative values, reflecting their vertical offset below the water surface.
-    (more details in Readme)
+
     args:
         com_gdf: GeoDataFrame - combined bathymetric data from multibeam and boundary points
 
@@ -41,7 +39,7 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     Correct depth values based on daily water level fluctuations.
 
     Interpolates water levels for measurement dates using a CSV file of waterlevel measurments, and adjusts all depth values relative to the water level on that day.
-    The reference day can be chosen manual, otherwise will be chosen automatically.
+    The reference day can be chosen manually, otherwise will be chosen automatically.
     (more details in Readme)
     args:
         gdf: GeoDataFrame - depth data (sonar and edge point) with measurement date and depth
@@ -63,7 +61,7 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     # transformation of all Date rows to datetime format
     gdf["Date_dt"] = pd.to_datetime(gdf["Date"], format="%m/%d/%Y")
 
-    # load CSV with measured waterlevels (CSV-Date Format: DD/MM/YYYY) and Datetransformation
+    # load CSV with measured waterlevels (CSV-Date Format: DD/MM/YYYY) and datetransformation
     csv_files = list(data_dir.glob("*.csv"))
     if len(csv_files) != 1:
         raise ValueError(f"Expected exactly one CSV file in {data_dir}, found {len(csv_files)}")
@@ -73,7 +71,7 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     wl["date_dt"] = pd.to_datetime(wl["date"], dayfirst=True, errors="raise")
     wl = wl.sort_values("date_dt")
 
-    # for interpoaltion: transform dates to numerical values
+    # for interpolation: transform dates to numerical values
     wl_ord = wl["date_dt"].map(lambda d: d.toordinal()).values
     wl_vals = wl["waterlevel"].values
     meas_ord = gdf["Date_dt"].map(lambda d: d.toordinal()).values
@@ -115,7 +113,7 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     # make sure "Date" gets saved in MM/DD/YYYY format
     gdf["Date"] = pd.to_datetime(gdf["Date"], format="%m/%d/%Y").dt.strftime("%m/%d/%Y")
 
-    # print the reference day and way to determine it
+    # print the reference day and way of determine it
     ref_day_str = ref_dt.strftime("%m/%d/%Y")
     if user_input_reference:
         print(f"Reference day from user input: {ref_day_str}")

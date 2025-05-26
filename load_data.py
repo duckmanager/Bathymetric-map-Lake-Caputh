@@ -15,7 +15,7 @@ def create_dataframe(data_dir: Path):
     """
     Establish DataFrame for later data storage
 
-    Creates pandas Dataframe with column count of the longest .sum file. Feature espacially important for .vel files.
+    Creates pandas Dataframe with column count of the longest .sum file. (Feature espacially important for .vel files.)
 
     args:
         data_dir: Path - path to folder with stored sonar data
@@ -60,8 +60,8 @@ def assign_data_to_dataframe(
     """
     Assign sonar and sonar-GPS data from .sum and .mat files to a unified DataFrame.
 
-    Reads all .sum files in the directory, extracts metadata and sample values, corrects UTC time, by using the correct utc-function and using data from corresponding .mat files, and compiles everything into a structured DataFrame.
-    (more details in Readme)
+    Reads all .sum files in the directory, extracts metadata and sample values, corrects UTC time, 
+    by using the correct utc-function and using data from corresponding .mat files, and compiles everything into a structured DataFrame.
     
     args:
         data_dir: Path - path to sonar-data
@@ -74,18 +74,18 @@ def assign_data_to_dataframe(
 
     data_list = []
 
-    # Iterate through sum-files
+    # Iterate through .sum-files
     for file in data_dir.glob("*.sum"):
-        file_id = file.stem  # Dateiname als file_id
+        file_id = file.stem  # filename as file_id
 
-        # read same .mat file as sum file
+        # read same .mat file as .sum file
         mat_file = data_dir / f"{file_id}.mat"
         if mat_file.exists():
             mat_data = read_mat(str(mat_file))
             raw_utc = mat_data.get("GPS", {}).get("Utc", [])
             gps_quality = mat_data.get("GPS", {}).get("GPS_Quality", [])
 
-            # Falls die Daten nicht als Liste vorliegen, in Array umwandeln
+            # transform to array, if data is no list
             if not isinstance(raw_utc, list):
                 raw_utc = raw_utc.flatten()
             if not isinstance(gps_quality, list):
@@ -99,7 +99,7 @@ def assign_data_to_dataframe(
         with file.open("r") as f:
             lines = f.readlines()
 
-        # extract data   ------- change to read_csv()
+        # extract data
         for i, line in enumerate(lines[1:]):  # skip header
             values = line.strip().split(",")
             row_dict = dict(zip(sum_header, values))
@@ -113,7 +113,7 @@ def assign_data_to_dataframe(
             )
             data_list.append(row_dict)
 
-    # put data in dataframe
+    # put data into dataframe
     sum_dataframe = pd.DataFrame(data_list, columns=sum_dataframe.columns)
 
     return sum_dataframe
@@ -148,10 +148,10 @@ def correct_utc(utc_list, gps_quality_list):
         print("Invalid UTC list!")
         return utc_list
 
-    # Zerlege den ersten gültigen UTC in Stunden, Minuten, Sekunden und Dezimalstelle
+    # Seperate first valid UTC into hours, minutes, seconds and decimals
     utc_str = f"{first_valid_utc:08.1f}"  # Format: HHMMSS.x
     base_time_str = utc_str[:6]  # HHMMSS
-    decimal_part = utc_str[7]  # Dezimalstelle
+    decimal_part = utc_str[7]  # Subseconds
 
     try:
         start_time = datetime.strptime(base_time_str, "%H%M%S")
@@ -159,7 +159,7 @@ def correct_utc(utc_list, gps_quality_list):
         print(f"Error parsing time: {e}")
         return utc_list
 
-    # Erzeuge den optimalen Zeitverlauf (eine Liste von korrigierten Timestamps)
+    # Create optimal timeline (list of corrected timeststamps)
     corrected_timestamps = [
         start_time + timedelta(seconds=i) for i in range(len(utc_list))
     ]
@@ -167,14 +167,14 @@ def correct_utc(utc_list, gps_quality_list):
         t.strftime("%H%M%S") + f".{decimal_part}" for t in corrected_timestamps
     ]
 
-    # Wandle Listen in NumPy-Arrays um, um vektorisierte Operationen zu ermöglichen
+    # Transform list to numpy array for vectorised matching
     utc_array = np.array(utc_list, dtype=object)
     gps_array = np.array(gps_quality_list, dtype=object)
 
-    # Bestimme die fehlerhaften Indizes: entweder UTC==0 oder GPS_Quality==0
+    # Determine faulty indices with UTC==0 or GPS_Quality==0
     mask = (utc_array == 0) | (gps_array == 0)
 
-    # Ersetze an diesen Indizes die fehlerhaften UTC-Werte durch die entsprechenden Einträge aus corrected_utc_full
+    # Substitute UTC of indices with ideal time stamps
     corrected_utc_array = np.array(corrected_utc_full)
     utc_array[mask] = corrected_utc_array[mask]
 
@@ -200,12 +200,14 @@ def get_gps_dataframe(data_dir: Path):
     returns:
         gps_geodf_projected: GeoDataFrame - projected GPS data with position, timestamp, and accuracy information
     """ 
-
+    
+    # prepare empty list
     gps_data_list = []
 
+    # iterate through the GPS files
     for gps_file in tqdm(data_dir.glob("*.txt")):
         gps_data = gps_file.read_text().splitlines()
-        bestposa = (None, None)  # Variable to safe lat long tuple
+        bestposa = (None, None)  # Variable to safe lat, long tuple
 
         for line in gps_data:
             # update when new bestposa is reached
@@ -219,7 +221,7 @@ def get_gps_dataframe(data_dir: Path):
                         bestposa_raw[15],
                         bestposa_raw[16],
                         bestposa_raw[17],
-                    )  #
+                    )  
                 else:
                     bestposa = (
                         bestposa_raw[11],
@@ -258,17 +260,14 @@ def get_gps_dataframe(data_dir: Path):
     # turn into geodataframe to project to UTM33N
     gps_geodf = gpd.GeoDataFrame(
         gps_df, crs="EPSG:4326", geometry=gpd.points_from_xy(gps_df.long, gps_df.lat)
-    )  # different opinions which variant is more performant
+    )
 
     # project geodataframe to local UTM 33N (epsg:25833)
     gps_geodf_projected = gps_geodf.to_crs(epsg=25833)
     return gps_geodf_projected
 
 
-# erneute Aufteilung in dicts anch datum -  ggf. doch besser vor der beim Einlesen innseperaten files zu machen, damit auch umehrere an einem Tag kein Problem ist
-# interpolate coords for missing .sec values
-# Debugging-Ausgaben in der Interpolationsfunktion platzieren
-
+# Future improments: allow reading multible files of the same day by sorting by date in advance.
 
 #########################################################################################################################################################
 #########################################################################################################################################################
@@ -279,7 +278,7 @@ def create_interpolated_coords(sum_df, gps_gdf):
     """
     Interpolate high-precision coordinates for sonar data using external GPS positions.
 
-    Matches external-GPS timestamps to sonar timestamps by interpolating the coordinates. 
+    Matches external-GPS timestamps to sonar timestamps with different decimalseconds by interpolating the coordinates. 
     Applies quality filters, and performs linear interpolation between valid 1-second GPS intervals to estimate sonar positions at sub-second resolution from full second external-gps data.
     (more details in Readme)
 

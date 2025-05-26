@@ -44,14 +44,14 @@ def get_args():
         "--filtering_max_distance",
         default=5,
         type=float,
-        help="Radius of area for automatic filtering. (in meters)",
+        help="Radius of area for automatic filtering. [m]",
     )
 
     arg_par.add_argument(
         "--filtering_threshold",
         default=0.5,
         type=float,
-        help="Threshold of discarding-difference between points to neighbor-points-mean in automatic filtering. (in meters)",
+        help="Threshold of discarding-difference between points to neighbor-points-mean in automatic filtering. [m]",
     )
     
     ####### manual point filtering
@@ -202,7 +202,7 @@ if __name__ == "__main__":
         args.sonar_data_dir, sum_dataframe_empty, sum_header)
     
     logging.info("reading external-GPS data")
-    gps_geodf_projected = get_gps_dataframe(args.gps_data_dir)  # including interpolation
+    gps_geodf_projected = get_gps_dataframe(args.gps_data_dir)
 
     logging.info("creating interpolated points")
     interpolated_sum, used_gps_gdf = create_interpolated_coords(
@@ -255,16 +255,5 @@ if __name__ == "__main__":
     gdf_validation_points.to_csv(args.validation_dataset_dir / "validation_points.csv", index=False)
 
     used_gps_gdf.to_csv(args.QC_dataset_dir / "used_GPS_points.csv", index=False)
-
-    # -filtered_data.to_csv(output_path / "sum_int_collection_filtered_cleandup.csv", index=False)
-    # -  faulty_data.to_csv(output_path / "sum_multibeam_error.csv", index=False)
-    # -selected_faulty_sum_data.to_csv(output_path / "sum_int_errors_selected.csv", index=False)
-    # --gdf_complete.to_csv(output_path / "depth_and_average_sum_int_filtered_outline.csv", index=False)
-    # --faulty_data.to_csv(output_path / "error_depth_and_average_sum_int_filtered.csv", index=False)
-    # adjusted_gdf.to_csv(output_path / "multibeam_nozeros.csv", index=False)
-
-    # output data as shp-file
-    # filtered_data.to_file(output_path / "sum_int.shp", driver='ESRI Shapefile')
-    # selected_faulty_sum_data.to_file(output_path / "sum_int_error.shp", driver='ESRI Shapefile')
 
     input("we're all done!")

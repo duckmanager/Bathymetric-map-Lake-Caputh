@@ -26,10 +26,10 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
         sum_df["Boat Direction (deg)"], errors="coerce"
     )
 
-    # convert Boat direction in Azimuth to radians - (why was that exactly neessary?)
+    # convert Boat direction from Azimuth to radians
     sum_df["Boat Direction (rad)"] = np.radians(sum_df["Boat Direction (deg)"])
 
-    # Define beam types and ceam correction angles - (insert source for beam angles)
+    # Define beam types and beam correction angles
     beams = [
         {"type": "VB", "depth_col": "VB Depth (m)", "angle": np.radians(0)},
         {"type": "Beam1", "depth_col": "BT Beam4 Depth (m)", "angle": np.radians(45)},
@@ -41,7 +41,7 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
     # empty list for new dataframe
     transformed_data = []
 
-    # Iterate over former depth
+    # Iterate over each depth measurement and correct coordinates
     for _, row in tqdm(
         sum_df.iterrows(), total=sum_df.shape[0], desc="Transforming sonar data"
     ):
@@ -54,12 +54,12 @@ def create_multibeam_points(sum_df: gpd.GeoDataFrame):
             depth = row[beam["depth_col"]]
 
             if pd.notna(depth):  # only if valid depth exists
-                if beam_type == "VB":
+                if beam_type == "VB":  # Vertical Beam (VB) stays at original position
                     new_x, new_y = (
                         base_x,
                         base_y,
-                    )  # Vertical Beam (VB) stays at original position
-                else:  # calculate position of new beams
+                    ) 
+                else:  # calculate position of new beams (1-4)
                     distance = np.tan(np.radians(25)) * float(
                         depth
                     )  # calculate distance to VB

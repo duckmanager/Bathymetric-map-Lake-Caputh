@@ -16,7 +16,6 @@ def generate_boundary_points(shp_data_dir:Path, point_data_dir:Path, edge_points
     Points between measurements (within 150m) receive interpolated depths.
     If no second measurement is close enough, the measured value is extrapolated over 15m.
     If edge_points_zero is True, all boundary points are assigned a depth of 0 without using any measurement or interpolation.
-    (See README for more details.)
 
     Args:
         shp_data_dir (Path): Path to the folder containing the shapefile of the lake (polygon).
@@ -47,7 +46,7 @@ def generate_boundary_points(shp_data_dir:Path, point_data_dir:Path, edge_points
     edge_points = pd.read_csv(csv_files[0])    
     edge_gdf = gpd.GeoDataFrame(
             edge_points,
-            geometry=gpd.points_from_xy(edge_points.Longitude, edge_points.Latitude), # change to Long Lat - always results in errors E N
+            geometry=gpd.points_from_xy(edge_points.Longitude, edge_points.Latitude),
             crs="EPSG:25833",
         )
 
@@ -147,7 +146,7 @@ def combine_multibeam_edge(geodf_projected, boundary_gdf):
     """
     Merge sonar points with artificial lake boundary points.
 
-    Combines georeferenced depth data from sonar beam measurements and interpolated shoreline points into a single GeoDataFrame for unified spatial analysis or export.
+    Combines georeferenced depth data from each sonar beam measurements and interpolated shoreline points into a single GeoDataFrame for unified spatial analysis or export.
 
     args:
         geodf_projected: GeoDataFrame - multibeam data with position and depth (from create_multibeam_points)

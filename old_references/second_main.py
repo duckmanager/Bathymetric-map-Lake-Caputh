@@ -584,3 +584,359 @@ def detect_and_remove_faulty_depths(geodf_projected: gpd.GeoDataFrame, max_dista
     removed_gdf = geodf_projected.iloc[removed_indices].copy()
 
     return filtered_gdf, removed_gdf
+
+def compute_statistics_intersections(depth_diff_df:pd.DataFrame):
+
+    """
+    Compute summary statistics and visualize depth differences from intersecting survey lines.
+
+    Calculates the mean and standard deviation of depth differences for each date pair in the input DataFrame and displays the distributions using a boxplot, including point counts above each box.
+
+    args:
+        depth_diff_df: DataFrame - depth differences grouped by date combinations, typically from calculate_depth_differences_intersections
+
+    returns:
+        stats_df: DataFrame - statistical summary with 'Mean' and 'StdDev' for each date combination
+        box: matplotlib object - the generated boxplot object (for optional further use or saving)
+    """
+
+    stats_df = pd.DataFrame({
+        'Mean': depth_diff_df.mean(),
+        'StdDev': depth_diff_df.std()
+    })
+
+    print(stats_df)
+
+
+    # create a boxplot with the statistics - maybe change to saveing to files later 
+    # determines scale of figure
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # create boxplot
+    box = ax.boxplot([depth_diff_df[col].dropna() for col in depth_diff_df.columns], 
+                      labels=depth_diff_df.columns, patch_artist=True)
+
+    # change date formatting
+
+
+    # scales uniform height of count for used points per boxplot
+    y_pos = max(depth_diff_df.max(skipna=True)) * 1.2 if not depth_diff_df.isna().all().all() else 1
+
+    # shows count and mean for used points per boxplot
+    for i, col in enumerate(depth_diff_df.columns, start=1):
+        n_points = depth_diff_df[col].count()
+        mean_val = depth_diff_df[col].mean()
+        ax.text(i, y_pos, f"n={n_points}", ha='center', va='bottom', fontsize=10, fontweight='bold')
+        ax.text(i, y_pos * 0.97, f"Ø={mean_val:.2f}", ha='center', va='top', fontsize=9, color='black')
+
+
+    # axis label and title
+    ax.set_xlabel("Daten überschneidener Messreihen")
+    ax.set_ylabel("Tiefenunterschied (m)")
+    ax.set_title("Tiefenunterschiede überschneidener Messreihen")
+
+    # x-and y- axis modifications
+    plt.xticks(rotation=45, ha='right')
+    ax.set_ylim(None, y_pos * 1.2)  # Extra Platz nach oben
+
+    plt.tight_layout()
+    plt.show()
+
+    # add tilte, maybe better date format, axis text, possibility to safe
+    return stats_df, box
+
+from pathlib import Path
+import pandas as pd
+import geopandas as gpd
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.widgets import RectangleSelector
+from tqdm import tqdm
+from shapely.geometry import Point, LineString
+
+def interactive_error_correction(
+    faulty_points_dir: Path,
+    filtered_gdf: gpd.GeoDataFrame,
+    manual_overwrite: bool = True,
+    vb_window_size: int = 3  # Anzahl VB-Punkte nach vorne und hinten für lokale Projektion
+):
+    FILTER_CSV = faulty_points_dir / "faulty_points.csv"
+    df = filtered_gdf.copy()
+
+    if 'orig_index' not in df.columns:
+        df['orig_index'] = df.index
+
+    if FILTER_CSV.exists():
+        if not manual_overwrite:
+            removed_points_df = pd.read_csv(FILTER_CSV)
+            bad = removed_points_df['orig_index'].tolist()
+            boundary_points = df[df['file_id'] == "artificial_boundary_points"]
+            df_corrected = pd.concat([df.drop(bad), boundary_points], ignore_index=True)
+            print(f"({len(bad)}) marked error points got loaded and removed from data")
+            return df_corrected
+        else:
+            removed_points_df = pd.read_csv(FILTER_CSV)
+            loaded_bad = removed_points_df['orig_index'].tolist()
+            print(f"({len(loaded_bad)}) marked error points loaded for manual check")
+    else:
+        loaded_bad = []
+
+    boundary_points = df[df['file_id'] == "artificial_boundary_points"]
+    df = df[df['file_id'] != "artificial_boundary_points"]
+    bad_indices = []
+
+    for fid in tqdm(df['file_id'].unique(), desc="Messfahrten"):
+        subdf = df[df['file_id'] == fid].copy()
+        vb_df = subdf[subdf['Beam_type'] == "VB"].copy()
+        if vb_df.empty:
+            print(f"Messfahrt {fid}: Keine VB-Punkte gefunden. Überspringe diese Fahrfahrt.")
+            continue
+
+        vb_coords = np.column_stack((vb_df['Longitude'], vb_df['Latitude']))
+        vb_dist = np.r_[0, np.cumsum(np.sqrt(np.sum(np.diff(vb_coords, axis=0)**2, axis=1)))]
+        vb_df['cum_dist'] = vb_dist
+
+        pts_all = []
+        fig, ax = plt.subplots(figsize=(10, 6))
+        markers = {}
+        beams = subdf['Beam_type'].unique()
+        colors = [
+            "#E69F00",  # Orange
+            "#56B4E9",  # Blau
+            "#009E73",  # Grün
+            "#F0E442",  # Gelb
+            "#CC79A7",  # Violett
+        ]
+
+        for color, beam in zip(colors, beams):
+            beam_df = subdf[subdf['Beam_type'] == beam].copy()
+            coords = np.column_stack((beam_df['Longitude'], beam_df['Latitude']))
+            proj = []
+
+            for i, (idx, row) in enumerate(beam_df.iterrows()):
+                x, y = row['Longitude'], row['Latitude']
+                beam_point = Point(x, y)
+
+                if beam == "VB":
+                    proj_val = vb_df.loc[idx, 'cum_dist']
+                else:
+                    if idx in vb_df.index:
+                        vb_idx = vb_df.index.get_loc(idx)
+                    else:
+                        vb_idx = np.searchsorted(vb_df.index, idx)
+                        vb_idx = np.clip(vb_idx, 0, len(vb_df) - 1)
+                    
+                    start = max(0, vb_idx - vb_window_size)
+                    end = min(len(vb_df), vb_idx + vb_window_size + 1)
+                    segment = vb_df.iloc[start:end]
+                    if len(segment) >= 2:
+                        local_line = LineString(zip(segment['Longitude'], segment['Latitude']))
+                        offset = segment['cum_dist'].iloc[0]
+                        proj_val = offset + local_line.project(beam_point)
+                    else:
+                        proj_val = 0
+
+                proj.append(proj_val)
+
+            depth = beam_df['Depth (m)'].values
+            ax.scatter(proj, depth, label=beam, color=color, s=15)
+            for d, dep, idx in zip(proj, depth, beam_df.index):
+                pts_all.append((d, dep, idx, color))
+
+        ax.set_xlabel("Fahrstrecke (m)")
+        ax.set_ylabel("Tiefe (m)")
+        if pts_all:
+            min_depth = min(p[1] for p in pts_all)
+            ax.set_ylim(min_depth - 0.5, 0)
+        ax.legend()
+        plt.title(f"Messfahrt: {fid}")
+
+        for p in pts_all:
+            if p[2] in loaded_bad:
+                marker, = ax.plot(p[0], p[1], 'ro', markersize=8)
+                markers[p[2]] = marker
+                if p[2] not in bad_indices:
+                    bad_indices.append(p[2])
+
+        def on_click(event):
+            if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                return
+            click_disp = ax.transData.transform((event.xdata, event.ydata))
+            distances = [np.hypot(*(
+                click_disp - ax.transData.transform((p[0], p[1]))
+            )) for p in pts_all]
+            i = int(np.argmin(distances))
+            if distances[i] < 10:
+                sel = pts_all[i]
+                if sel[2] in markers:
+                    markers[sel[2]].remove()
+                    del markers[sel[2]]
+                    if sel[2] in bad_indices:
+                        bad_indices.remove(sel[2])
+                else:
+                    marker, = ax.plot(sel[0], sel[1], 'ro', markersize=5)
+                    markers[sel[2]] = marker
+                    bad_indices.append(sel[2])
+                fig.canvas.draw()
+
+        def onselect(eclick, erelease):
+            x_min, x_max = sorted([eclick.xdata, erelease.xdata])
+            y_min, y_max = sorted([eclick.ydata, erelease.ydata])
+            for p in pts_all:
+                if x_min <= p[0] <= x_max and y_min <= p[1] <= y_max:
+                    if p[2] in markers:
+                        markers[p[2]].remove()
+                        del markers[p[2]]
+                        if p[2] in bad_indices:
+                            bad_indices.remove(p[2])
+                    else:
+                        marker, = ax.plot(p[0], p[1], 'ro', markersize=8)
+                        markers[p[2]] = marker
+                        bad_indices.append(p[2])
+            fig.canvas.draw()
+
+        fig.canvas.mpl_connect('button_press_event', on_click)
+        rect_selector = RectangleSelector(ax, onselect, useblit=True,
+                                          button=[1], minspanx=5, minspany=5,
+                                          spancoords='pixels', interactive=True)
+
+        plt.show()
+
+    df_corrected = df.drop(bad_indices)
+    df_corrected = pd.concat([df_corrected, boundary_points], ignore_index=True)
+    df.loc[bad_indices].to_csv(FILTER_CSV, index=False)
+    print(f"{len(bad_indices)} points were removed.")
+    return df_corrected
+
+
+    spacing = 1  # distance between artifical edge points in m (CRS EPSG:25833)
+    interpolation_distance = 150  # distance to cover between measured points
+    extrapolation_distance = 15  # distance to extrapolate measured depth to the side without measured point within interpolation_distance
+
+    # load lake edge and transform to line-geometry
+    lake_boundary = gpd.read_file(shp_data_dir / "waterbody.shp").to_crs(
+        "EPSG:25833"
+    )
+    boundary = lake_boundary.unary_union.exterior
+
+    # load measured points and transform into gdf
+    edge_points = pd.read_csv(
+        point_data_dir / "measured_edgepoints.csv" # oder "measured_edgepoints.csv"
+    )  # change name and N E - change in readme
+    edge_gdf = gpd.GeoDataFrame(
+        edge_points,
+        geometry=gpd.points_from_xy(edge_points.E, edge_points.N),
+        crs="EPSG:25833",
+    )
+
+    # check for uniform dates
+    unique_dates = edge_gdf["Date"].unique()
+    if len(unique_dates) == 1:
+        common_date = unique_dates[0]  # save the date
+    else:
+        print(
+            "Error: All edge point measurements must be from the same date to allow for later correction of water level fluctuations. Please fix manually"
+        )
+        print("Found dates:", unique_dates)
+
+    # create artifical edge points with equal distances
+    distances = np.arange(0, boundary.length, spacing)
+    boundary_points = [boundary.interpolate(d) for d in distances]
+    boundary_gdf = gpd.GeoDataFrame(geometry=boundary_points, crs="EPSG:25833")
+    boundary_gdf["depth"] = (
+        np.nan
+    )  # depth column for better differentiation of interpolation
+
+    # Assigning nearest neighbor points and find nearest edge point to measurments
+    # transforming into an array for faster access
+    boundary_coords = np.column_stack(
+        (boundary_gdf.geometry.x, boundary_gdf.geometry.y)
+    )
+    edge_coords = np.column_stack((edge_gdf.geometry.x, edge_gdf.geometry.y))
+    # find nearest neighbors of each edge point to assign measured depth to nearest edge point
+    boundary_tree = cKDTree(boundary_coords)
+    _, edge_gdf["nearest_boundary_idx"] = boundary_tree.query(edge_coords)
+
+    # assigning measured depths to nearest artifical edge points
+    boundary_gdf.loc[edge_gdf["nearest_boundary_idx"], "depth"] = edge_gdf[
+        "Depth (m)"
+    ].values
+
+    # sort edge points along the edge
+    edge_gdf = edge_gdf.sort_values("nearest_boundary_idx").reset_index(drop=True)
+    edge_gdf["next_point"] = edge_gdf["geometry"].shift(-1)
+    edge_gdf["next_depth"] = edge_gdf["Depth (m)"].shift(-1)
+    edge_gdf["distance_to_next"] = edge_gdf.geometry.distance(edge_gdf["next_point"])
+
+    # Interpolation between measurment points if <interpoaltion_distance m distance
+    for _, row in edge_gdf.iterrows():
+        if (
+            pd.notna(row["next_depth"])
+            and row["distance_to_next"] < interpolation_distance
+        ):
+            idx1 = row["nearest_boundary_idx"]
+            idx2 = boundary_tree.query([row["next_point"].x, row["next_point"].y])[1]
+            idx_start, idx_end = min(idx1, idx2), max(idx1, idx2)
+            range_idx = range(idx_start, idx_end + 1)
+            depth_diff = row["next_depth"] - row["Depth (m)"]
+            num_points = len(range_idx)
+            depth_step = depth_diff / (num_points - 1) if num_points > 1 else 0
+            for i, idx in enumerate(range_idx):
+                boundary_gdf.at[idx, "depth"] = row["Depth (m)"] + i * depth_step
+
+    # Berechne den Abstand zum vorherigen Messpunkt (cyclic)
+    edge_gdf["prev_point"] = edge_gdf["geometry"].shift(1)
+    edge_gdf["prev_depth"] = edge_gdf["Depth (m)"].shift(1)
+    edge_gdf["distance_to_prev"] = edge_gdf.geometry.distance(edge_gdf["prev_point"])
+
+    # Extrapolation entlang der Seeumrisslinie (zyklisch) in beide Richtungen
+
+    num_extrap_points = int(extrapolation_distance / spacing)
+
+    for _, row in edge_gdf.iterrows():
+        if pd.isna(row["nearest_boundary_idx"]):
+            continue
+        idx = int(row["nearest_boundary_idx"])
+        depth_value = row["Depth (m)"]
+
+        # Extrapolation in forwards dircetion:
+        # Condition: no measured points within >=interpolation_distance m
+        if (
+            pd.isna(row["next_depth"])
+            or row["distance_to_next"] >= interpolation_distance
+        ):
+            for i in range(1, num_extrap_points + 1):
+                forward_idx = (idx + i) % len(boundary_gdf)
+                # Fülle nur, wenn noch kein Wert gesetzt wurde
+                if pd.isna(boundary_gdf.at[forward_idx, "depth"]):
+                    boundary_gdf.at[forward_idx, "depth"] = depth_value
+                else:
+                    break  # Stoppe, wenn bereits ein Wert existiert
+
+        # Extrapolate in backwards direction:
+        # Condition: no measured points within >=interpolation_distance m
+        if (
+            pd.isna(row["prev_depth"])
+            or row["distance_to_prev"] >= interpolation_distance
+        ):
+            for i in range(1, num_extrap_points + 1):
+                backward_idx = (idx - i) % len(boundary_gdf)
+                if pd.isna(boundary_gdf.at[backward_idx, "depth"]):
+                    boundary_gdf.at[backward_idx, "depth"] = depth_value
+                else:
+                    break
+
+    # Delete all artifical edge points without assigned depth
+    boundary_gdf = boundary_gdf.dropna(subset=["depth"]).copy()
+
+    # safe to universal columns for merging with sonar measurments
+    boundary_gdf["Longitude"] = boundary_gdf.geometry.x
+    boundary_gdf["Latitude"] = boundary_gdf.geometry.y
+    boundary_gdf["Depth (m)"] = boundary_gdf["depth"]
+    boundary_gdf.drop(columns=["depth"], inplace=True)
+    boundary_gdf["file_id"] = "artificial_boundary_points"
+    boundary_gdf["Date"] = (
+        common_date  # if fails, the measumrent points used multiple different dates
+    )
+
+    return boundary_gdf
