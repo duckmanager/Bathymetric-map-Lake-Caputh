@@ -22,15 +22,15 @@ The autoamtic filtering, checks each point based on the mean of all sourrounding
 In order to validate the interpolation quality, points can be filtered out at regular variable intervals to create a validation and interpolation data set.
 
 ---
-##Additional functionalitys not included in main.py:##
+## Additional functionalitys not included in main.py:##
 - A themperature profile and average temperature for the water column can be calculated based on manual temperature measuremnts  e.g. to use for manual temperature correction in the RiverSurveyor Live Software, as an alternative to CTD-probes. (temperature_plot.py)
 
 
 - To validate the measuring consistency of the RS-data, close points within a variable distance as well as with a time and space difference get compared and the differences displayed in boxplots. (QC_point_consistency.py)
 
 ---
-(all functions are expected to be in the same folder)  
-(All CSV and shp files must be stored individually in separate folders, i.e. without other files of the same type.)
+All functions are expected to be in the same folder  
+All CSV and shp files must be stored individually in separate folders, i.e. without other files of the same type.
 
 ---
 Setup: 
