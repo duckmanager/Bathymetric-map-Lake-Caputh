@@ -45,7 +45,7 @@ def get_args():
     arg_par.add_argument(
         "--data_dir",
         "-dd",
-        default=Path().joinpath("output", "processed_data"),
+        default=Path.cwd().parent.joinpath("output", "processed_data"),
         type=Path,
         help="Path to folder with the processed dataset.",
     )
@@ -53,7 +53,7 @@ def get_args():
     arg_par.add_argument(
         "--output_data_dir",
         "-odd",
-        default=Path().joinpath("output", "QC"),
+        default=Path.cwd().parent.joinpath("output", "QC"),
         type=Path,
         help="Path to folder to store the results of the quality controle.",
     )
@@ -73,13 +73,7 @@ if __name__ == "__main__":
     # logging.getLogger().setLevel(logging.INFO)
     args = get_args()
 
-
-
-
-
-
-
-
+    args.output_data_dir.mkdir(parents=True, exist_ok=True)
 
 
 #########################################################################################################################################

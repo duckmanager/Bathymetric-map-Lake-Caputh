@@ -104,7 +104,7 @@ def get_args():
     arg_par.add_argument(
         "--sonar_data_dir",
         "-sdd",
-        default=Path().joinpath("data", "sonar_data"),
+        default=Path.cwd().parent.joinpath("data", "sonar_data"),
         type=Path,
         help="Path to folder with sonar data.",
     )
@@ -112,7 +112,7 @@ def get_args():
     arg_par.add_argument(
         "--gps_data_dir",
         "-gpsd",
-        default=Path().joinpath("data", "gps_data"),
+        default=Path.cwd().parent.joinpath("data", "gps_data"),
         type=Path,
         help="Path to folder with the external gps data.",
     )
@@ -120,7 +120,7 @@ def get_args():
     arg_par.add_argument(
         "--water_level_dir",
         "-wld",
-        default=Path().joinpath("data", "waterlevel"),
+        default=Path.cwd().parent.joinpath("data", "waterlevel"),
         type=Path,
         help="Path to folder with waterlevel csv.",
     )
@@ -128,7 +128,7 @@ def get_args():
     arg_par.add_argument(
         "--lake_shp_dir",
         "-lsd",
-        default=Path().joinpath("data", "shp_files"),
+        default=Path.cwd().parent.joinpath("data", "shp_files"),
         type=Path,
         help="Path to folder with shp-file of the waterbody",
     )
@@ -136,7 +136,7 @@ def get_args():
     arg_par.add_argument(
         "--point_data_dir",
         "-pdd",
-        default=Path().joinpath("data", "outline"),
+        default=Path.cwd().parent.joinpath("data", "outline"),
         type=Path,
         help="Path to folder with csv of edge measurments.",
     )
@@ -146,7 +146,7 @@ def get_args():
     arg_par.add_argument(
         "--finished_dataset_dir",
         "-fdd",
-        default=Path().joinpath("output", "processed_data"),
+        default=Path.cwd().parent.joinpath("output", "processed_data"),
         type=Path,
         help="Path to folder to store csv of finished dataset.",
     )
@@ -154,7 +154,7 @@ def get_args():
     arg_par.add_argument(
         "--validation_dataset_dir",
         "-vdd",
-        default=Path().joinpath("output", "validation_data"),
+        default=Path.cwd().parent.joinpath("output", "validation_data"),
         type=Path,
         help="Path to folder to store csv's of validation datasets.",
     )
@@ -162,7 +162,7 @@ def get_args():
     arg_par.add_argument(
         "--QC_dataset_dir",
         "-qcd",
-        default=Path().joinpath("output", "QC"),
+        default=Path.cwd().parent.joinpath("output", "QC"),
         type=Path,
         help="Path to folder to store csv's for later quality assesment.",
     )
@@ -170,7 +170,7 @@ def get_args():
     arg_par.add_argument(
         "--faulty_points_dir",
         "-fpd",
-        default=Path().joinpath("output", "faulty_points"),
+        default=Path.cwd().parent.joinpath("output", "faulty_points"),
         type=Path,
         help="Path to folder to store csv with marked erroneous sample points.",
     )
@@ -189,6 +189,14 @@ if __name__ == "__main__":
 
     # logging.getLogger().setLevel(logging.INFO)
     args = get_args()
+
+    for o_path in [
+        args.finished_dataset_dir,
+        args.validation_dataset_dir,
+        args.QC_dataset_dir,
+        args.faulty_points_dir,
+        ]:
+        o_path.mkdir(parents=True, exist_ok=True)
 
     ######################################
     # functions

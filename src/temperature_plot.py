@@ -28,7 +28,7 @@ def get_args():
     arg_par.add_argument(
         "--temperature_data_dir",
         "-dd",
-        default=Path().joinpath("output", "temperature_plot"),
+        default=Path.cwd().parent.joinpath("data", "temperature"),
         type=Path,
         help="Path to folder with CSV of temperature measurments.",
     )
@@ -36,7 +36,7 @@ def get_args():
     arg_par.add_argument(
         "--output_data_dir",
         "-odd",
-        default=Path().joinpath("output", "temperature_plot"),
+        default=Path.cwd().parent.joinpath("output", "temperature_plot"),
         type=Path,
         help="Path to folder to store the temperature plots.",
     )
@@ -55,6 +55,7 @@ def get_args():
 args = get_args()
 
 
+args.output_data_dir.mkdir(parents=True, exist_ok=True)
 
 data_folder = args.temperature_data_dir  # path to csv-data
 output_folder = args.output_data_dir # path to save the results
