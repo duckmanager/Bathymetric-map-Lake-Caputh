@@ -27,14 +27,17 @@ def create_dataframe(data_dir: Path):
     # recognize file with the longest header
     longest_file = max(
         data_dir.glob("*.sum"),
-        key=lambda f: len(f.read_text().splitlines()[0]),
+        key=lambda f: len(f.read_text(encoding="latin1").splitlines()[0]),
         default=None,
     )
 
     # create geodataframe with longest header variables + extra columns("file_id", "Utc", "Lat", "Long")
-    header = None
-    with longest_file.open("r") as file:
-        sum_header = file.readline().strip().split(",")
+    # XXX: REMOVE ME header = None
+    sum_header = longest_file.read_text(encoding="latin1").splitlines()[0].strip().split(",")
+
+    # XXX: REMOVE ME
+    # with longest_file.open("r", encoding="latin1") as file:
+    #     sum_header = file.readline().strip().split(",")
 
     # assign additional columns not present in sum files
     additional_columns = ["file_id", "Utc", "Lat", "Long"]
@@ -96,8 +99,10 @@ def assign_data_to_dataframe(
             print(f"Warning: Mat-file -{file_id}.mat- not found")
             corrected_utc = []
 
-        with file.open("r") as f:
-            lines = f.readlines()
+        lines = file.read_text(encoding="latin1").splitlines()
+        # XXX: REMOVE ME
+        # with file.open("r") as f:
+        #     lines = f.readlines()
 
         # extract data
         for i, line in enumerate(lines[1:]):  # skip header
