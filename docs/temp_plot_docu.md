@@ -1,8 +1,18 @@
-# Documentation for temperature_plot script#
-process and show temeprature- depth profiles form manual measurements to decide about proceeding in manual temperature correction of echo sounder data
+# Documentation for temperature_plot script
+A themperature profile and average temperature for the water column can be calculated based on manual temperature measuremnts  e.g. to use for manual temperature correction in the RiverSurveyor Live Software, as an alternative to CTD-probes. (temperature_plot.py)
 
-temperature_profile_plotter.py
 
+process and show temeprature- depth profiles form manual measurements to decide about manual temperature correction of echo sounder data
+
+`temperature_plot.py`is seperate from `main.py`
+## Options
+To use temperature measuremnts of different depths, the temperature gets interpolated for different steps.   
+To change the interpoaltion steps [in m], use: (Default 0.1m)
+```
+--interpolation_steps X.X
+```
+
+---
 Functionality overview:
 This script processes multiple temperature–depth profiles stored in CSV format.
 Each CSV file must contain a column "Depth" and one or more columns representing

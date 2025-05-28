@@ -1,49 +1,33 @@
 # Script to process data from the Riversurveyor M9 echo-sounder to optimize for bathymetric mapping. 
 
-Einleitender satz  
-**more info at the [docs](/docs/main_docu.md#create_interpolated_points)**
+The Sontek Riversurveyor M9 is a powerfull tool to measure flow velocity and discharge. 
+Physically identical to the related Hydrosurveyor M9, it also has good prerequisites for bathymetric mapping.  
+This project aims to utilize the Riversurveyor's full potential for bathymetric mapping, outside of the HYPACK MAX software.
+
+It was created as part of my bachelor thesis on the bathymetric mapping of Lake Caputh (Brandenburg, Germany).
+
+
+**more info at the [docs](/docs/main_docu.md)**
 
 ## Table of contents
-- [Core functionality](#core-functionality)
-- [Additional functions](#additional-functions)
+- [Functionality](#functionality)
 - [Requirements](#requirements)
 - [Quickstart](#quickstart)
+- [How to use this project](#how-to-use-this-project)
 - [Overview](#overview)
 
-## What this project can do for you
-explain when to use this project
-## How to use this project
-explain flags here
-## Core functionality -> mv to docs
+## Functionality
+This project can be used to achieve a higher precision and richness of Riversurveyor M9 data especially combined with an seperate RTK-GNSS (in particular the ProNivo PNR21).
+The Code combines the GNS and echo-sounder data and allows for for the use of each depth-beam measurement individually - just like the Hydrosurveyor.  
+Water level fluctuations between different survey days will be corrected based on level measurements.  
+To allow for higher measurement coverage, manual depth measurements along the shore can be used to create uniformly distributed depths along the shoreline.
+Two filtering methods give full controle over your data quality.  
+The point consistency can be tested as a measure of the recording consistency and filter quality.
+To verify the seperate interpolation for a bathymetric map, variable validation datasets can be created.
 
-No map interpolation is included.
-The survey is expected to be done with an additional RTK-GNSS (specifically the Pro Nivo PNR21) but can be adapted to work with a different or without a seperate GNSS.
-The RiverSurveyor M9 (RS) data is expected as the result of the RiverSurveyor Live-Software Export in matlab and ASCII format.
-
-General functionality, combined in main.py:
-
-- The echo-sounder data gets linked with the GNSS data and is corrected for faulty data and differences in the recording times (load_data.py).
-
-- To achieve maximum data richness, each depth-beam of the RS gets geolocated individually instead of using it combined in "Bottom Track". (multibeam_location.py)
-
-- In order to optimally include the bank areas of the waterbody in the interpolation, measurements of the bank can be entered, from which points along the bank are created.
-Alternativly an general depth of 0m at the bank can be assumed.
-Waterlevel changes from different survey dates can be corrected in the data, based on waterlevel measurements. (survey_adjustments.py)
-
-- To optimal filter the echo sounder data for faulty measurements, two detection variants are implemented:
-The a  utoamtic filtering, checks each point based on the mean of all sourrounding points (based on user defined variables). (automatic_detection.py)
-
--   The manual filtering opens each survey as a individual plot, for the user to mark or unmark f  aulty points by hand. (manual_correction.py)
-In order to validate the interpolation quality, points can be filtered out at regular variable i  ntervals to create a validation and interpolation data set.
-
-## Additional functions -> mv to docs  
-- A themperature profile and average temperature for the water column can be calculated based on manual temperature measuremnts  e.g. to use for manual temperature correction in the RiverSurveyor Live Software, as an alternative to CTD-probes. (temperature_plot.py)
-
-
-- To validate the measuring consistency of the RS-data, close points within a variable distance as well as with a time and space difference get compared and the differences displayed in boxplots. (QC_point_consistency.py)
+Based on seperate temperature measurments, temperature stratification of the waterbody can be analyzed, e.g. to use as manual temperature correction in the RiverSurveyor Live Software as an alternative to a CTD-probe.
 
 ## Requirements
-All CSV and shp files must be stored individually in separate folders, i.e. without other files of the same type.
 
 **required python packages:** (as provided by requirements .txt)
 - pandas
@@ -56,25 +40,127 @@ All CSV and shp files must be stored individually in separate folders, i.e. with
 - matplotlib
 
 
-**Exemplary structure of the data dir:**
+**Exemplary structure of the data dir:**  
+Save your data in the according files.
+Dataformat specified at [docs](/docs/needed_data.md)
+
 ```
 data
-├───gps_data        external gps data as .txt
-├───outline         .csv
-│   └───others
-├───shp_files
-├───sonar_data
-├───temperature
-└───waterlevel
+├───gps_data        .txt's of external GNSS data
+├───outline         .csv of shore depths
+│   └───others      place for other shore depth variants
+├───shp_files       .shp of the waterbody
+├───sonar_data      .sum's & .mat's of the RiverSurveyor data
+├───temperature     .csv of temperature measurements (one per day)
+└───waterlevel      .csv of waterlevel measurements
 ```
 
 ## Quickstart
+Install packages from requirements.txt, preferable with conda (and the conda-forge channel)
 
-make it work and pls without the docs  
-from `src` run like so:
+
+Go to `src` (`cd src`)
+### Full bathymetric data processing
+For full bathymetric data processing, run:
 ```bash
-python main.py --im_a_flag
+python main.py
 ```
+To skip the manual filtering, run:
+```bash
+python main.py --manual_correction_overwrite
+```
+To skip the automatic filtering, run:
+```bash
+python main.py --automatic_detection
+```
+To apply an existing filter-list without overwriting it, run:
+```bash
+python main.py --automatic_detection --manual_correction_overwrite
+```
+
+for further options, see [docs](/docs/main_docu.md#options)
+### Quality Controle
+To controle the data-point consistency run:
+```
+python QC_point_consistency.py
+```
+for further options, see [docs](/docs/QC_docu.md#options)
+### Temperature stratification
+To analyze temperature stratification, run:
+```
+python temperature_plot.py
+```
+for further options, see [docs](/docs/temp_plot_docu.md#options)
+
+## How to use this project
+
+### Options for bathymetric processing (main.py)
+#### Automatic Filtering
+To disable automatic filtering, set:
+```
+--automatic_detection
+```
+To change the parameters [m], which will be applied to select faulty points, use:
+```
+--filtering_max_distance X
+```
+```
+--filtering_threshold X
+```
+for further details, see [docs](/docs/main_docu.md#automatic-filtering)
+
+#### Manual Filtering
+To only show plots when no filter list of earlier filtering exists, use:
+```
+--manual_correction_overwrite
+```
+for further details, see [docs](/docs/main_docu.md#manual-filtering)
+
+#### Waterlevel Corrections
+To specify the day to whose water level all measurements are referenced, use:
+```
+--level_reference_date MM/DD/YYYY
+```
+Otherwise the best fitting will be automatically applied and shown.
+For further details, see [docs](/docs/main_docu.md#waterlevel-corrections)
+
+#### Shore-points
+To not use depth measurments from the shore line but to create points of 0m depth instead, use:
+```
+--edge_points_zero
+```
+for further details, see [docs](/docs/main_docu.md#shore-points)
+
+#### Create Validation dataset
+To change the interval for assignment to the validation dataset, use (every Xth point will be assigned to val-dataset):
+```
+--validation_sample_rate X
+```
+
+To disable creation of an validation dataset, set:
+```
+--skip_validation_sampling
+```
+for further details, see [docs](/docs/main_docu.md#create-validation-dataset)
+
+
+### Options for controle of Point Consistency 
+Seperate scrpit: `QC_point_consistency.py`
+
+To change parameters taht determine which points are getting compared, use:
+How close points have to be, to be compared [in meters]:
+```
+--matching_radius X
+```
+Minimal time difference between points to be compared [in minutes]:
+```
+--min_time_diff X
+```
+for further details, see [docs](/docs/QC_docu.md#)
+
+### Options for temperature stratification
+No basic changes are needed, for further details, see [docs](/docs/temp_plot_docu.md)
+
 ## Overview
 main.py flowchart:
 ![alt text](docs/flowchart_main.png)

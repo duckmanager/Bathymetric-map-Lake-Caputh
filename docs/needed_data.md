@@ -1,5 +1,7 @@
-# Data needed for full functionality#
+# Data needed for full functionality
 All CSV and shp files must be stored individually in separate folders, i.e. without other files of the same type.
+
+
 
 ### Temperature Stratification
 - **File type**: `.csv`
@@ -10,7 +12,7 @@ All CSV and shp files must be stored individually in separate folders, i.e. with
   - One file per measurement day and function run
   - Filename not relevant
 ---
-### GNSS Data
+### external GNSS Data
 - **File type**: `.txt`
 - **function**: `get_gps_dataframe`
 - **Structure**:
@@ -32,6 +34,7 @@ All CSV and shp files must be stored individually in separate folders, i.e. with
 - **Structure**:
   - Shapefile of the waterbody outline
   - Filename is not relevant
+  - Only have one file of this type in the file!
 ---
 ### Shoreline Measurements
 - **File type**: `.csv`
@@ -41,6 +44,7 @@ All CSV and shp files must be stored individually in separate folders, i.e. with
   - Filename is not relevant
   - For each measurement point:
     - `Longitude`, `Latitude`, `Depth (m)`, `Date` (Format: MM/DD/YYYY)
+  - Only have one file of this type in the file!
 ---
 ### Water Level Measurements
 - **File type**: `.csv`
@@ -50,3 +54,4 @@ All CSV and shp files must be stored individually in separate folders, i.e. with
   - Filename is not relevant
   - For each measurement day:
     - `date` (Format: DD/MM/YYYY), `waterlevel` (in m)
+  - Only have one file of this type in the file!

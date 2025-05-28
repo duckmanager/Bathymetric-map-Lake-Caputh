@@ -30,14 +30,8 @@ def create_dataframe(data_dir: Path):
         key=lambda f: len(f.read_text(encoding="latin1").splitlines()[0]),
         default=None,
     )
-
-    # create geodataframe with longest header variables + extra columns("file_id", "Utc", "Lat", "Long")
-    # XXX: REMOVE ME header = None
+    
     sum_header = longest_file.read_text(encoding="latin1").splitlines()[0].strip().split(",")
-
-    # XXX: REMOVE ME
-    # with longest_file.open("r", encoding="latin1") as file:
-    #     sum_header = file.readline().strip().split(",")
 
     # assign additional columns not present in sum files
     additional_columns = ["file_id", "Utc", "Lat", "Long"]

@@ -76,7 +76,7 @@ def correct_waterlevel(gdf:gpd.GeoDataFrame, data_dir:Path, reference_day: str="
     wl_vals = wl["waterlevel"].values
     meas_ord = gdf["Date_dt"].map(lambda d: d.toordinal()).values
 
-    # Lineare Interpolation of waterlevels between measuring days - keeping exact matches
+    # Linear Interpolation of waterlevels between measuring days - keeping exact matches
     gdf["waterlevel"] = np.interp(meas_ord, wl_ord, wl_vals)
 
     # determining the reference day

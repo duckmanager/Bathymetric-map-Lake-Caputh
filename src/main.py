@@ -229,7 +229,7 @@ if __name__ == "__main__":
     adjusted_gdf = adjust_depths(gdf_combined)
 
     logging.info("adjusting waterlevels")
-    gdf_waterlevel_corrected = correct_waterlevel(adjusted_gdf, args.water_level_dir, reference_day="")
+    gdf_waterlevel_corrected = correct_waterlevel(adjusted_gdf, args.water_level_dir, args.level_reference_date)
 
     logging.info("Applying automated point filtering")
     filtered_data, faulty_data = detect_and_remove_faulty_depths(
