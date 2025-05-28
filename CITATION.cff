@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+title: >-
+  Method for bathymetric mapping with the Sontek
+  RiverSurveyor M9 on the example of Lake Caputh
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - family-names: Schimansky
+    given-names: Paul
+    affiliation: University of Potsdam
+    orcid: 'https://orcid.org/0009-0002-8811-5840'

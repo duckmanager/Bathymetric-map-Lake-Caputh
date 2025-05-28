@@ -1,4 +1,4 @@
-# Script to process data from the Riversurveyor M9 echo-sounder to optimize for bathymetric mapping. 
+# Method for bathymetric mapping with the Sontek RiverSurveyor M9 on the example of Lake Caputh
 
 The Sontek Riversurveyor M9 is a powerfull tool to measure flow velocity and discharge. 
 Physically identical to the related Hydrosurveyor M9, it also has good prerequisites for bathymetric mapping.  
