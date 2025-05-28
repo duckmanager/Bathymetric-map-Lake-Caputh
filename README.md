@@ -27,6 +27,9 @@ To verify the seperate interpolation for a bathymetric map, variable validation 
 
 Based on seperate temperature measurments, temperature stratification of the waterbody can be analyzed, e.g. to use as manual temperature correction in the RiverSurveyor Live Software as an alternative to a CTD-probe.
 
+
+Tested on Python 3.11  
+Tested on Windows (x86), MacOS (ARM), Linux (x86)
 ## Requirements
 
 **required python packages:** (as provided by requirements .txt)
@@ -54,6 +57,7 @@ data
 ├───temperature     .csv of temperature measurements (one per day)
 └───waterlevel      .csv of waterlevel measurements
 ```
+
 
 ## Quickstart
 Install packages from requirements.txt, preferable with conda (and the conda-forge channel)
