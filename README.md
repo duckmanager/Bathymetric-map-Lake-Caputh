@@ -82,6 +82,11 @@ To apply an existing filter-list without overwriting it, run:
 python main.py --automatic_detection --manual_correction_overwrite
 ```
 
+To skip using manual measured shore depths and apply 0m depths along the shore, add:
+```
+--edge_points_zero
+```
+
 for further options, see [docs](/docs/main_docu.md#options)
 ### Quality Controle
 To controle the data-point consistency run:
