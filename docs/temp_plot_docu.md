@@ -1,13 +1,13 @@
 # Documentation for temperature_plot script
-A themperature profile and average temperature for the water column can be calculated based on manual temperature measuremnts  e.g. to use for manual temperature correction in the RiverSurveyor Live Software, as an alternative to CTD-probes. (temperature_plot.py)
+A temperature profile and average temperature for the water column can be calculated based on manual temperature measurements e.g. to use for manual temperature correction in the RiverSurveyor Live Software, as an alternative to CTD-probes. (temperature_plot.py)
 
 
-process and show temeprature- depth profiles form manual measurements to decide about manual temperature correction of echo sounder data
+process and show temperature- depth profiles form manual measurements to decide about manual temperature correction of echo sounder data
 
-`temperature_plot.py`is seperate from `main.py`
+`temperature_plot.py`is separate from `main.py`
 ## Options
-To use temperature measuremnts of different depths, the temperature gets interpolated for different steps.   
-To change the interpoaltion steps [in m], use: (Default 0.1m)
+To use temperature measurements of different depths, the temperature gets interpolated for different steps.   
+To change the interpolation steps [in m], use: (Default 0.1m)
 ```
 --interpolation_steps X.X
 ```
@@ -56,7 +56,7 @@ Functionality:
    - Displays average temperatures (total and 0–4 m) as a labeled text box in the top-left corner
    - Y-axis is inverted to display depth increasing downwards
    - X-axis limits are dynamically set based on min/max temperature values
-   - Includes grid, axis labels, title, and legend (with average curve labeled only as "Ø Profil",
+   - Includes grid, axis labels, title, and legend (with average curve labeled only as "Ø Profile",
      no temperature shown in legend)
 
 5. Export:
