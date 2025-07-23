@@ -1,8 +1,8 @@
 # Method for bathymetric mapping with the Sontek RiverSurveyor M9 on the example of Lake Caputh
 
-The Sontek Riversurveyor M9 is a powerfull tool to measure flow velocity and discharge. 
-Physically identical to the related Hydrosurveyor M9, it also has good prerequisites for bathymetric mapping.  
-This project aims to utilize the Riversurveyor's full potential for bathymetric mapping, outside of the HYPACK MAX software.
+The Sontek RiverSurveyor M9 is a powerful tool to measure flow velocity and discharge. 
+Physically identical to the related HydroSurveyor M9, it also has good prerequisites for bathymetric mapping.  
+This project aims to utilize the RiverSurveyor's full potential for bathymetric mapping, outside the HYPACK MAX software.
 
 It was created as part of my bachelor thesis on the bathymetric mapping of Lake Caputh (Brandenburg, Germany).
 
@@ -17,22 +17,22 @@ It was created as part of my bachelor thesis on the bathymetric mapping of Lake 
 - [Overview](#overview)
 
 ## Functionality
-This project can be used to achieve a higher precision and richness of Riversurveyor M9 data especially combined with an seperate RTK-GNSS (in particular the ProNivo PNR21).
-The Code combines the GNS and echo-sounder data and allows for for the use of each depth-beam measurement individually - just like the Hydrosurveyor.  
+This project can be used to achieve a higher precision and richness of RiverSurveyor M9 data especially combined with a separate RTK-GNSS (in particular the ProNivo PNR21).
+The Code combines the GNSS and echo-sounder data and allows for for the use of each depth-beam measurement individually - just like the HydroSurveyor.  
 Water level fluctuations between different survey days will be corrected based on level measurements.  
 To allow for higher measurement coverage, manual depth measurements along the shore can be used to create uniformly distributed depths along the shoreline.
-Two filtering methods give full controle over your data quality.  
+Two filtering methods give full control over your data quality.  
 The point consistency can be tested as a measure of the recording consistency and filter quality.
-To verify the seperate interpolation for a bathymetric map, variable validation datasets can be created.
+To verify the separate interpolation for a bathymetric map, variable validation datasets can be created.
 
-Based on seperate temperature measurments, temperature stratification of the waterbody can be analyzed, e.g. to use as manual temperature correction in the RiverSurveyor Live Software as an alternative to a CTD-probe.
+Based on separate temperature measurements, temperature stratification of the waterbody can be analyzed, e.g. to be used as a manual temperature correction in the RiverSurveyor Live Software as an alternative to a CTD-probe.
 
 
 Tested on Python 3.11  
 Tested on Windows (x86), MacOS (ARM), Linux (x86)
 ## Requirements
 
-**required python packages:** (as provided by requirements .txt)
+**required python packages:** (as provided by requirements.txt)
 - pandas
 - geopandas
 - shapely
@@ -60,7 +60,7 @@ data
 
 
 ## Quickstart
-Install packages from requirements.txt, preferable with conda (and the conda-forge channel)
+Install packages from requirements.txt, preferably with conda (and the conda-forge channel)
 
 
 Go to `src` (`cd src`)
@@ -87,9 +87,9 @@ To skip using manual measured shore depths and apply 0m depths along the shore, 
 --edge_points_zero
 ```
 
-for further options, see [docs](/docs/main_docu.md#options)
-### Quality Controle
-To controle the data-point consistency run:
+For further options, see [docs](/docs/main_docu.md#options)
+### Quality Control
+To control the data-point consistency run:
 ```
 python QC_point_consistency.py
 ```
@@ -134,7 +134,7 @@ Otherwise the best fitting will be automatically applied and shown.
 For further details, see [docs](/docs/main_docu.md#waterlevel-corrections)
 
 #### Shore-points
-To not use depth measurments from the shore line but to create points of 0m depth instead, use:
+To not use depth measurements from the shore line but to create points of 0m depth instead, use:
 ```
 --edge_points_zero
 ```
@@ -153,10 +153,10 @@ To disable creation of an validation dataset, set:
 for further details, see [docs](/docs/main_docu.md#create-validation-dataset)
 
 
-### Options for controle of Point Consistency 
-Seperate scrpit: `QC_point_consistency.py`
+### Options for control of Point Consistency 
+Separate script: `QC_point_consistency.py`
 
-To change parameters taht determine which points are getting compared, use:
+To change parameters that determine which points are getting compared, use:
 How close points have to be, to be compared [in meters]:
 ```
 --matching_radius X
