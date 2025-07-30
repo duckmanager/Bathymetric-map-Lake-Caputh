@@ -13,11 +13,12 @@ General functionality, combined in main.py:
   Alternatively, a general depth of 0 m at the bank can be assumed.  
   Water level changes from different survey dates can be corrected in the data, based on water level measurements (survey_adjustments.py).
 
-- To optimally filter the echo-sounder data for faulty measurements, two detection variants are implemented:  
-  The automatic filtering checks each point based on the mean of all surrounding points (based on user-defined variables) (automatic_detection.py).
+  To optimally filter the echo-sounder data for faulty measurements, two detection variants are implemented:  
+    - The automatic filtering checks each point based on the mean of all surrounding points (based on user-defined variables) (automatic_detection.py).
 
-- The manual filtering opens each survey as an individual plot for the user to mark or unmark faulty points by hand (manual_correction.py).  
-  In order to validate the interpolation quality, points can be filtered out at regular variable intervals to create a validation and interpolation data set.
+    - The manual filtering opens each survey as an individual plot for the user to mark or unmark faulty points by hand (manual_correction.py).  
+  
+- In order to validate the interpolation quality, points can be filtered out at regular variable intervals to create a validation and interpolation data set.
 
 ## Options
 ### Automatic Filtering
@@ -131,15 +132,14 @@ Requirements for faulty points:
 - GPS_Quality = 0 → implying bad sample quality  
 - Utc = 0 → implying unusable time
 
-This procedure assumes that all other points are reliable Utc samples.  
+This procedure assumes that all other points (especially the first Utc-datapoint) are reliable Utc samples.  
 Switches in single decimal seconds can be observed, especially after Utc = 0 without GPS_Quality = 0 points.  
 Maybe a switch of sub-decimal seconds results in a rounding change.  
-If the single decimal-second changes are viewed as unreliable, `corrected_utc_full` can be handed back to `assign_data_to_dataframe`.
 
 ---
 ### get_gps_dataframe
 Input: 
-- data_dir :path of data including the .txt files with external GPS data. This cant contain other .txt files than the external GPS. Only one external GPS file per day can be processed. May need to combine them manually. Beware to keep the BESTPOSA and GPZDA order!
+- data_dir :path of data including the .txt files with external GPS data. This can't contain other .txt files than the external GPS. Only one external GPS file per day can be processed. May need to combine them manually. Beware to keep the BESTPOSA and GPZDA order!
 (external GPS: external GPS - PNR21 with BESTPOSA and GPZDA at 1Hz sampling rate, others can be implemented by changing the parsing)
 
 Output: 
@@ -183,7 +183,7 @@ output:
 
 Functionality: 
 
-The function iterates through sum_df rows, georeferencing the Depth of all five beams.
+The function iterates through sum_df rows, georeferencing the depth of all five beams.
 The boat heading direction in azimuth from .sum files gets used as orientation of the beams relative to the central/vertical beam (VB) and is therefore transformed to degrees.
 Angles of beams to the VB are assigned in clockwise janus configuration (top view) and 25° angle relative to VB, based on (Sontek: RiverSurveyor S5/M9 System Manual) and (Sontek, a Xylem Brand: Webinar [https://www.youtube.com/watch?v=ukb-B9e5OTY], accessed: 15.02.25). Long/Lat of VB remain the same. Lat/Long of Beam 1-4 get calculated by 
 ```
@@ -240,7 +240,7 @@ changes measured depth distance into neagtive depth values
 ### correct_waterlevel
 Input: 
 - gdf: GeoDataFrame containing sonar measurement data, including depth and spatial coordinates.
-- data_dir: Path to data-folder including one "waterlevel" folder with a CSV file "waterlevel.csv" containing measured water levels. "waterlevel.scv" contains "waterlevel" in m and "date" in (DD/MM/YYYY-format)column. The earliest measurement must be of same day or earlier than the first sonar measurement. The latest measurement must be at the same day or later than latest sonar-measurement.
+- data_dir: Path to data-folder including one "waterlevel" folder with a CSV file "waterlevel.csv" containing measured water levels. "waterlevel.scv" contains "waterlevel" in m and "date" (in DD/MM/YYYY-format) column. The earliest measurement must be of same day or earlier than the first sonar measurements. The latest measurement must be at the same day or later than the latest sonar-measurements.
 
 Variables:
 - reference_day (optional): Reference day for depth correction (MM/DD/YYYY format), if empty, reference day gets determined automatically
@@ -297,7 +297,7 @@ Input variables:
 Functionality: 
 
 Removes faulty points by comparing to averaged depth of surrounding points.
-Checks if automatic_detection =False - if so, the rest will be skipped. geodf_projected will be skipped and removed_gdf an empty gdf
+Checks if automatic_detection =False - if so, the rest will be skipped.
 Saves original index in "orig_index". Iterates through every point. Calculate average depth of all points within "max_distance" radius, excluding evaluated point. Uses cKDTrees for neighbor identification. If Depth of point differs more than "threshold" from average depth of surrounding points, it gets discarded and saved in removed_gdf, except file_id = artificial_boundary_point. Artificial edge points get recognized for average depth, but won't be discarded as faulty points.
 
 ---
@@ -326,7 +326,7 @@ In Code Variables & Settings:
 - Interactive Modes:
     - Click Selection: Click near a point to toggle its selection (mark/unmark as faulty).
     - Rectangle Selection: Click and drag to select or deselect all points within the rectangle.
-    - Toggle Behavior: Re-clicking or re-selecting a previously marked point removes the marker.
+    - Toggle Behavior: Re-selecting a previously marked point removes the marker.
 
 
 Functionality:
@@ -347,8 +347,9 @@ After reviewing all surveys, the user closes the plots, and the selected faulty 
 ### filter_validation_points
 Input: 
 - com_gdf, GeoDataFrame - containing the full set of bathymetric data points
-sample_rate, int - rate at which every point gets assigned to validation dataset
-create_validation_data, bool - if set FALSE, dataset splitting will be skipped and empty DataFrames will be returned.
+sample_rate, 
+- int - rate at which every point gets assigned to validation dataset
+- create_validation_data, bool - if set FALSE, dataset splitting will be skipped and empty DataFrames will be returned.
 
 Output: 
 - gdf_interpol_points, GeoDataFrame: Contains all remaining sonar points used for interpolation, excluding boundary points and regularly sampled validation points. 

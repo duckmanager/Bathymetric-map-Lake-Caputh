@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Secondary Sktript to validate the measuring consistency of the processed data from the main skript.
+Secondary script to validate the measuring consistency of the processed data from the main skript.
 """
 # librarys:
 import argparse

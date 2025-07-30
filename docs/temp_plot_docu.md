@@ -2,12 +2,12 @@
 A temperature profile and average temperature for the water column can be calculated based on manual temperature measurements e.g. to use for manual temperature correction in the RiverSurveyor Live Software, as an alternative to CTD-probes. (temperature_plot.py)
 
 
-process and show temperature- depth profiles form manual measurements to decide about manual temperature correction of echo sounder data
+Process and show temperature- depth profiles form manual measurements to decide about manual temperature correction of echo sounder data
 
 `temperature_plot.py`is separate from `main.py`
 ## Options
 To use temperature measurements of different depths, the temperature gets interpolated for different steps.   
-To change the interpolation steps [in m], use: (Default 0.1m)
+To change the interpolation steps [in m] (Default 0.1m), use: 
 ```
 --interpolation_steps X.X
 ```
@@ -47,7 +47,7 @@ Functionality:
 3. Averaging:
    - Calculates a mean temperature profile from all valid interpolated profiles, ignoring NaNs
    - Additionally computes:
-     - Mean temperature across the entire depth
+     - Mean temperature across the entire measured depth
      - Mean temperature for the top 4 meters
 
 4. Plotting:
