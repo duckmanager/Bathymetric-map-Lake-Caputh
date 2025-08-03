@@ -1,0 +1,11 @@
+Note:
+This project uses two versions of shoreline point data:
+
+only_measured_edgepoints.csv 
+contains only directly measured shoreline points.
+
+all_edgepoints.csv 
+includes both the measured points and additional estimated shoreline points along the southwestern shore. 
+These estimated points were assigned a depth of 0 m due to access restrictions in a nature reserve. 
+The 0 m depth is justified by the fact that water level fluctuations in the lake regularly flood the adjacent bog area, 
+making a defined shoreline edge unlikely in that section.
