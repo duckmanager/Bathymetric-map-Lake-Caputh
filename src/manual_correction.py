@@ -137,6 +137,8 @@ def interactive_error_correction(
         ax.set_ylabel("Tiefe (m)")
         if pts_all:
             ax.set_ylim(min(p[1] for p in pts_all) - 0.5, 0)
+        # Add dummy point for legend entry
+        ax.plot([], [], 'ro', label='Flagged')  # ensures 'Faulty P' is always in legend
         ax.legend()
         plt.title(f"Messfahrt: {survey_id}")
 
