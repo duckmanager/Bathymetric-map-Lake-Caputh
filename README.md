@@ -1,4 +1,4 @@
-# Method for bathymetric mapping with the Sontek RiverSurveyor M9 on the example of Lake Caputh
+# Method for bathymetric mapping with the SonTek RiverSurveyor M9: a case study of Lake Caputh
 
 The Sontek RiverSurveyor M9 is a powerful tool to measure flow velocity and discharge. 
 Physically identical to the related HydroSurveyor M9, it also has good prerequisites for bathymetric mapping.  
